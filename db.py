@@ -3,8 +3,8 @@ import os
 import re
 import unicodedata
 
-from sqlalchemy import (Boolean, Column, DateTime, Integer, MetaData, String,
-                        Table, Text, create_engine)
+from sqlalchemy import (BigInteger, Boolean, Column, DateTime, Float, Integer, MetaData,
+                        String, Table, Text, create_engine)
 
 
 def _db_url():
@@ -68,6 +68,71 @@ orientacoes = Table(
     Column("votacao_id", Integer, primary_key=True),
     Column("lideranca", String(60), primary_key=True),  # partido, "Governo", "Oposição"...
     Column("voto", String(30)),
+)
+
+despesas = Table(  # CEAPS
+    "despesas", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("ano", Integer, index=True),
+    Column("mes", Integer),
+    Column("data", String(10)),
+    Column("codigo_senador", Integer, index=True),
+    Column("nome", String(120)),
+    Column("tipo", String(300)),
+    Column("tipo_documento", String(80)),
+    Column("fornecedor", String(300)),
+    Column("cnpj_cpf", String(30)),
+    Column("documento", String(80)),
+    Column("detalhamento", Text),
+    Column("valor", Float),
+)
+
+processos = Table(
+    "processos", metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("identificacao", String(60)),
+    Column("sigla", String(20), index=True),
+    Column("numero", String(20)),
+    Column("ano", Integer, index=True),
+    Column("codigo_materia", BigInteger),
+    Column("ementa", Text),
+    Column("autoria", Text),
+    Column("tipo_documento", String(120)),
+    Column("tipo_conteudo", String(120)),
+    Column("situacao", String(200)),
+    Column("data_apresentacao", String(10), index=True),
+    Column("data_situacao", String(10)),
+    Column("tramitando", Boolean),
+    Column("virou_norma", Boolean, default=False),
+    Column("url", String(300)),
+)
+
+autorias = Table(
+    "autorias", metadata,
+    Column("processo_id", BigInteger, primary_key=True),
+    Column("codigo_senador", Integer, primary_key=True, index=True),
+    Column("principal", Boolean, default=False),
+)
+
+perfis = Table(  # detalhe, comissões e cargos de cada senador (JSON da API)
+    "perfis", metadata,
+    Column("codigo", Integer, primary_key=True),
+    Column("detalhe", Text),
+    Column("comissoes", Text),
+    Column("cargos", Text),
+    Column("atualizado", DateTime),
+)
+
+usuarios = Table(
+    "usuarios", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("login", String(60), unique=True, nullable=False),
+    Column("nome", String(120)),
+    Column("senha_hash", String(300), nullable=False),
+    Column("admin", Boolean, default=False),
+    Column("ativo", Boolean, default=True),
+    Column("criado", DateTime),
+    Column("ultimo_acesso", DateTime),
 )
 
 meta = Table(

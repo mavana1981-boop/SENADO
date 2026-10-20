@@ -255,3 +255,99 @@ def opcoes_filtro():
             "GROUP BY sigla_materia ORDER BY n DESC"))]
         ult = c.execute(select(meta.c.valor).where(meta.c.chave == "ultima_coleta")).scalar()
     return {"partidos": partidos, "ufs": ufs, "siglas": siglas, "ultima_coleta": ult}
+
+
+# ---------------- Aba Votações ----------------
+
+def lista_votacoes(f: Filtros, busca: str = "", limite: int = 300):
+    """Votações do período para o seletor (mais recentes primeiro)."""
+    base = Filtros(f.inicio, f.fim, "", "", f.sigla, opostas=False)
+    where, p = base.where_votacoes()
+    p["lim"] = limite
+    cond_busca = ""
+    if busca:
+        # aceita "PL 3626", "3626/2023", ou trecho da descrição
+        termos = busca.replace("/", " ").split()
+        partes = []
+        for i, t in enumerate(termos):
+            k = f"b{i}"
+            p[k] = f"%{t.lower()}%"
+            partes.append(f"(LOWER(COALESCE(vt.descricao_materia,'')) LIKE :{k} "
+                          f"OR LOWER(COALESCE(vt.descricao_votacao,'')) LIKE :{k} "
+                          f"OR LOWER(COALESCE(vt.sigla_materia,'')) LIKE :{k} "
+                          f"OR CAST(vt.numero_materia AS VARCHAR(12)) LIKE :{k} "
+                          f"OR CAST(vt.ano_materia AS VARCHAR(6)) LIKE :{k})")
+        cond_busca = " AND " + " AND ".join(partes)
+    sql = text(f"""
+        SELECT vt.id, vt.data, vt.sigla_materia, vt.numero_materia, vt.ano_materia,
+               vt.descricao_materia, vt.dispositivo, vt.secreta, vt.qtd_sim, vt.qtd_nao
+        FROM votacoes vt WHERE {where}{cond_busca}
+        ORDER BY vt.data DESC LIMIT :lim""")
+    with engine.connect() as c:
+        return [dict(r) for r in c.execute(sql, p).mappings()]
+
+
+def detalhe_votacao(vid: int):
+    with engine.connect() as c:
+        v = c.execute(text("SELECT * FROM votacoes WHERE id = :id"), {"id": vid}).mappings().first()
+        if not v:
+            return None
+        v = dict(v)
+        oris = [dict(r) for r in c.execute(text(
+            "SELECT lideranca, voto FROM orientacoes WHERE votacao_id = :id"), {"id": vid}).mappings()]
+        vts = [dict(r) for r in c.execute(text(
+            "SELECT nome, nome_norm, codigo_senador AS codigo, partido AS partido_voto, uf, voto "
+            "FROM votos WHERE votacao_id = :id"), {"id": vid}).mappings()]
+
+    # lideranças institucionais primeiro, depois partidos em ordem alfabética
+    ordem = {"Governo": 0, "Oposição": 1, "Maioria": 2, "Minoria": 3}
+    oris.sort(key=lambda o: (ordem.get(o["lideranca"], 9), o["lideranca"]))
+    ori_por_partido = {o["lideranca"]: o["voto"] for o in oris}
+    gov = ori_por_partido.get("Governo")
+    opo = ori_por_partido.get("Oposição")
+
+    cad = _cadastro()
+    for r in vts:
+        s = cad.get(r["codigo"]) if r["codigo"] else None
+        r["nome"] = (s or {}).get("nome") or r["nome"]
+        r["foto"] = (s or {}).get("foto")
+        r["em_exercicio"] = bool(s.get("em_exercicio")) if s else None
+        r["partido"] = r["partido_voto"]          # nesta aba vale o partido na data do voto
+        op = ori_por_partido.get(r["partido_voto"])
+        r["ori_partido"] = op
+        r["seguiu_partido"] = (r["voto"] == op) if op in ("SIM", "NÃO") and r["voto"] in ("SIM", "NÃO") else None
+        r["com_governo"] = (r["voto"] == gov) if gov in ("SIM", "NÃO") and r["voto"] in ("SIM", "NÃO") else None
+        r["com_oposicao"] = (r["voto"] == opo) if opo in ("SIM", "NÃO") and r["voto"] in ("SIM", "NÃO") else None
+    vts.sort(key=lambda r: (r["voto"], r["partido"] or "", r["nome"]))
+
+    # placar por partido (na data do voto)
+    por_partido = {}
+    for r in vts:
+        d = por_partido.setdefault(r["partido_voto"] or "—",
+                                   {"partido": r["partido_voto"] or "—", "SIM": 0, "NÃO": 0, "outros": 0})
+        if r["voto"] in ("SIM", "NÃO"):
+            d[r["voto"]] += 1
+        else:
+            d["outros"] += 1
+    for d in por_partido.values():
+        d["orientacao"] = ori_por_partido.get(d["partido"])
+        d["total"] = d["SIM"] + d["NÃO"] + d["outros"]
+    placar = sorted(por_partido.values(), key=lambda d: (-d["total"], d["partido"]))
+
+    # contagem a partir dos votos individuais (a API às vezes traz os totais nulos)
+    contagem = {"SIM": 0, "NÃO": 0, "ABSTENÇÃO": 0, "OUTROS": 0}
+    for r in vts:
+        contagem[r["voto"] if r["voto"] in contagem else "OUTROS"] += 1
+    if v["secreta"]:
+        contagem = {"SIM": v["qtd_sim"] or 0, "NÃO": v["qtd_nao"] or 0,
+                    "ABSTENÇÃO": v["qtd_abstencao"] or 0, "OUTROS": 0}
+    else:
+        contagem["SIM"] = contagem["SIM"] or (v["qtd_sim"] or 0)
+        contagem["NÃO"] = contagem["NÃO"] or (v["qtd_nao"] or 0)
+
+    traidores = []  # quem votou contra a orientação do próprio partido
+    if not v["secreta"]:
+        traidores = [r for r in vts if r["seguiu_partido"] is False]
+
+    return {"votacao": v, "orientacoes": oris, "votos": vts, "placar": placar,
+            "contagem": contagem, "gov": gov, "opo": opo, "traidores": traidores}

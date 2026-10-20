@@ -13,6 +13,7 @@ Fontes:
         -> cadastro, foto, partido e UF
 """
 import argparse
+import json
 import logging
 import os
 import time
@@ -21,10 +22,13 @@ from datetime import date, datetime, timedelta
 import requests
 from sqlalchemy import delete, insert, select, update
 
-from db import (engine, init_db, meta, norm_nome, norm_partido, norm_voto,
+from db import (autorias, despesas, engine, init_db, meta, norm_nome, norm_partido,
+                norm_voto, perfis, processos,
                 orientacoes, senadores, votacoes, votos)
 
 BASE = os.environ.get("SENADO_API", "https://legis.senado.leg.br/dadosabertos")
+ADM = os.environ.get("SENADO_ADM_API", "https://adm.senado.gov.br/adm-dadosabertos/api/v1")
+CEAPS_CSV = "https://www.senado.leg.br/transparencia/LAI/verba/despesa_ceaps_{ano}.csv"
 LEGISLATURA = int(os.environ.get("LEGISLATURA", "57"))
 INICIO_LEGISLATURA = os.environ.get("INICIO_LEGISLATURA", "2023-02-01")
 PAUSA = 0.25  # a API aceita até 10 req/s; ficamos bem abaixo
@@ -38,7 +42,7 @@ sess.headers.update({"Accept": "application/json",
 # ---------------- HTTP ----------------
 
 def get_json(caminho: str, tentativas: int = 5):
-    url = f"{BASE}{caminho}"
+    url = caminho if caminho.startswith("http") else f"{BASE}{caminho}"
     for i in range(tentativas):
         try:
             r = sess.get(url, timeout=60)
@@ -276,13 +280,239 @@ def marcar_coleta(conn):
     conn.execute(insert(meta).values(chave="ultima_coleta", valor=agora))
 
 
+# ---------------- CEAPS (cota parlamentar) ----------------
+
+def _num_br(v):
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("R$", "").replace(" ", "")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def parse_ceaps_adm(itens):
+    """Formato da API administrativa (adm.senado.gov.br): já traz codSenador."""
+    out = []
+    for d in itens or []:
+        if d.get("id") is None:
+            continue
+        out.append({
+            "id": int(d["id"]), "ano": d.get("ano"), "mes": d.get("mes"),
+            "data": (d.get("data") or "")[:10] or None,
+            "codigo_senador": d.get("codSenador"),
+            "nome": (d.get("nomeSenador") or "").strip(),
+            "tipo": (d.get("tipoDespesa") or "").strip(),
+            "tipo_documento": d.get("tipoDocumento"),
+            "fornecedor": (d.get("fornecedor") or "").strip(),
+            "cnpj_cpf": d.get("cpfCnpj"), "documento": d.get("documento"),
+            "detalhamento": d.get("detalhamento"),
+            "valor": _num_br(d.get("valorReembolsado")),
+        })
+    return out
+
+
+def parse_ceaps_csv(texto: str, ano: int, nomes_para_codigo: dict):
+    """Plano B: CSV da Transparência (latin-1, ';', 1ª linha é metadado, sem código do senador)."""
+    import csv
+    import io
+    linhas = texto.splitlines()[1:]
+    out = []
+    for i, r in enumerate(csv.DictReader(io.StringIO("\n".join(linhas)), delimiter=";")):
+        nome = (r.get("SENADOR") or "").strip()
+        data = (r.get("DATA") or "").strip()
+        if "/" in data:  # dd/mm/aaaa
+            dd, mm, aa = (data.split("/") + ["", "", ""])[:3]
+            data = f"{aa}-{mm.zfill(2)}-{dd.zfill(2)}" if aa else None
+        cod_doc = r.get("COD_DOCUMENTO") or ""
+        out.append({
+            "id": int(cod_doc) if cod_doc.strip().isdigit() else ano * 10_000_000 + i,
+            "ano": int(r.get("ANO") or ano), "mes": int(r.get("MES") or 0) or None,
+            "data": data or None,
+            "codigo_senador": nomes_para_codigo.get(norm_nome(nome)),
+            "nome": nome, "tipo": (r.get("TIPO_DESPESA") or "").strip(),
+            "tipo_documento": None, "fornecedor": (r.get("FORNECEDOR") or "").strip(),
+            "cnpj_cpf": r.get("CNPJ_CPF"), "documento": r.get("DOCUMENTO"),
+            "detalhamento": r.get("DETALHAMENTO"),
+            "valor": _num_br(r.get("VALOR_REEMBOLSADO")),
+        })
+    return out
+
+
+def gravar_ceaps(conn, ano: int, linhas):
+    """Substitui o ano inteiro (o Senado revisa lançamentos retroativamente)."""
+    vistos, unicos = set(), []
+    for r in linhas:
+        if r["id"] in vistos:
+            continue
+        vistos.add(r["id"])
+        unicos.append(r)
+    conn.execute(delete(despesas).where(despesas.c.ano == ano))
+    for i in range(0, len(unicos), 2000):
+        conn.execute(insert(despesas), unicos[i:i + 2000])
+    return len(unicos)
+
+
+def coletar_ceaps(anos):
+    for ano in anos:
+        linhas = None
+        try:
+            itens = get_json(f"{ADM}/senadores/despesas_ceaps/{ano}")
+            if isinstance(itens, dict):  # alguns serviços vêm envelopados {data: [...]}
+                itens = itens.get("data") or itens.get("dados") or []
+            linhas = parse_ceaps_adm(itens)
+        except Exception as e:
+            log.warning("API administrativa falhou para CEAPS %s (%s); tentando CSV", ano, e)
+        if not linhas:
+            try:
+                r = sess.get(CEAPS_CSV.format(ano=ano), timeout=120,
+                             headers={"Accept": "text/csv,*/*"})
+                if r.status_code == 200:
+                    with engine.connect() as c:
+                        mapa = {n: cod for cod, n in c.execute(
+                            select(senadores.c.codigo, senadores.c.nome_norm))}
+                    linhas = parse_ceaps_csv(r.content.decode("latin-1"), ano, mapa)
+            except requests.RequestException as e:
+                log.warning("CSV da CEAPS %s indisponível: %s", ano, e)
+        if linhas:
+            with engine.begin() as c:
+                n = gravar_ceaps(c, ano, linhas)
+            log.info("CEAPS %s: %d lançamentos", ano, n)
+
+
+# ---------------- Proposições (processos) ----------------
+
+def _primeiro_autor(autoria: str) -> str:
+    primeiro = (autoria or "").split(",")[0]
+    primeiro = primeiro.split("(")[0]
+    for prefixo in ("Senadora ", "Senador ", "Deputada ", "Deputado "):
+        if primeiro.strip().startswith(prefixo):
+            primeiro = primeiro.strip()[len(prefixo):]
+    return norm_nome(primeiro)
+
+
+def _virou_norma(p: dict) -> bool:
+    sit = norm_nome(p.get("situacaoAtual") or "")
+    return ("norma juridica" in sit) or bool(p.get("normaGerada")) or ("transformad" in sit)
+
+
+def parse_processo(p: dict) -> dict:
+    ident = (p.get("identificacao") or "").strip()      # "PL 1234/2025"
+    sigla, numero, ano = "", "", None
+    if " " in ident:
+        sigla, resto = ident.split(" ", 1)
+        numero, _, a = resto.partition("/")
+        ano = int(a) if a.strip().isdigit() else None
+    tram = p.get("tramitando")
+    return {
+        "id": int(p["id"]), "identificacao": ident, "sigla": sigla, "numero": numero.strip(),
+        "ano": ano, "codigo_materia": p.get("codigoMateria"), "ementa": p.get("ementa"),
+        "autoria": p.get("autoria"), "tipo_documento": p.get("tipoDocumento"),
+        "tipo_conteudo": p.get("tipoConteudo"), "situacao": p.get("situacaoAtual"),
+        "data_apresentacao": (p.get("dataApresentacao") or "")[:10] or None,
+        "data_situacao": (p.get("dataSituacaoAtual") or "")[:10] or None,
+        "tramitando": (str(tram).lower() in ("sim", "s", "true")) if tram is not None else None,
+        "virou_norma": _virou_norma(p), "url": p.get("urlDocumento"),
+    }
+
+
+def gravar_processos(conn, codigo_senador: int, nome_norm: str, itens):
+    n = 0
+    for p in itens or []:
+        if p.get("id") is None:
+            continue
+        linha = parse_processo(p)
+        existe = conn.execute(select(processos.c.id).where(processos.c.id == linha["id"])).first()
+        if existe:
+            conn.execute(update(processos).where(processos.c.id == linha["id"]).values(**linha))
+        else:
+            conn.execute(insert(processos).values(**linha))
+        principal = bool(nome_norm) and _primeiro_autor(linha["autoria"]) == nome_norm
+        conn.execute(delete(autorias).where(autorias.c.processo_id == linha["id"],
+                                            autorias.c.codigo_senador == codigo_senador))
+        conn.execute(insert(autorias).values(processo_id=linha["id"],
+                                             codigo_senador=codigo_senador, principal=principal))
+        n += 1
+    return n
+
+
+def coletar_processos(codigos=None):
+    with engine.connect() as c:
+        q = select(senadores.c.codigo, senadores.c.nome_norm)
+        if codigos:
+            q = q.where(senadores.c.codigo.in_(codigos))
+        alvo = c.execute(q).all()
+    for cod, nn in alvo:
+        try:
+            itens = get_json(f"/processo?codigoParlamentarAutor={cod}&v=1")
+        except Exception as e:
+            log.warning("processos do senador %s: %s", cod, e)
+            continue
+        with engine.begin() as c:
+            n = gravar_processos(c, cod, nn, itens if isinstance(itens, list) else [])
+        log.info("processos senador %s: %d", cod, n)
+
+
+# ---------------- Perfil (detalhe, comissões, cargos) ----------------
+
+def gravar_perfil(conn, codigo: int, detalhe, comissoes, cargos):
+    conn.execute(delete(perfis).where(perfis.c.codigo == codigo))
+    conn.execute(insert(perfis).values(
+        codigo=codigo, detalhe=json.dumps(detalhe or {}, ensure_ascii=False),
+        comissoes=json.dumps(comissoes or {}, ensure_ascii=False),
+        cargos=json.dumps(cargos or {}, ensure_ascii=False), atualizado=datetime.now()))
+
+
+def coletar_perfis(codigos=None):
+    with engine.connect() as c:
+        q = select(senadores.c.codigo)
+        if codigos:
+            q = q.where(senadores.c.codigo.in_(codigos))
+        alvo = [r[0] for r in c.execute(q)]
+    for cod in alvo:
+        try:
+            det = get_json(f"/senador/{cod}.json")
+            com = get_json(f"/senador/{cod}/comissoes.json")
+            car = get_json(f"/senador/{cod}/cargos.json")
+        except Exception as e:
+            log.warning("perfil %s: %s", cod, e)
+            continue
+        with engine.begin() as c:
+            gravar_perfil(c, cod, det, com, car)
+    log.info("perfis atualizados: %d", len(alvo))
+
+
+def _passo(nome, fn, *a):
+    """Uma etapa que falha não derruba as outras."""
+    try:
+        fn(*a)
+    except Exception:
+        log.exception("etapa %s falhou", nome)
+
+
 def executar(desde: date | None = None, so_senadores=False):
     init_db()
     coletar_senadores()
     if not so_senadores:
+        hoje = date.today()
+        completa = desde is not None
         if desde is None:
-            desde = date.today() - timedelta(days=45)
-        coletar_votacoes(desde, date.today())
+            desde = hoje - timedelta(days=45)
+        _passo("votações", coletar_votacoes, desde, hoje)
+        with engine.begin() as c:
+            vincular_senadores(c)
+        # CEAPS: na carga completa, todos os anos; no dia a dia, o ano corrente
+        # (e o anterior até março, quando ainda chegam lançamentos atrasados)
+        inicio_ceaps = int(INICIO_LEGISLATURA[:4]) if completa else (
+            hoje.year - 1 if hoje.month <= 3 else hoje.year)
+        _passo("CEAPS", coletar_ceaps, range(inicio_ceaps, hoje.year + 1))
+        _passo("proposições", coletar_processos)
+        _passo("perfis", coletar_perfis)
     with engine.begin() as c:
         vincular_senadores(c)
         marcar_coleta(c)
@@ -292,10 +522,23 @@ def carga_inicial_se_vazio():
     """Usado no primeiro deploy: se o banco estiver vazio, coleta a legislatura inteira."""
     init_db()
     with engine.connect() as c:
-        tem = c.execute(select(votacoes.c.id).limit(1)).first()
-    if not tem:
+        tem = {t.name: c.execute(select(t).limit(1)).first() is not None
+               for t in (votacoes, despesas, processos, perfis)}
+    if not tem["votacoes"]:
         log.info("banco vazio — carga completa desde %s", INICIO_LEGISLATURA)
         executar(date.fromisoformat(INICIO_LEGISLATURA))
+        return
+    # banco de uma versão anterior: completa só o que falta
+    coletar_senadores()
+    if not tem["despesas"]:
+        _passo("CEAPS", coletar_ceaps, range(int(INICIO_LEGISLATURA[:4]), date.today().year + 1))
+    if not tem["processos"]:
+        _passo("proposições", coletar_processos)
+    if not tem["perfis"]:
+        _passo("perfis", coletar_perfis)
+    with engine.begin() as c:
+        vincular_senadores(c)
+        marcar_coleta(c)
 
 
 if __name__ == "__main__":

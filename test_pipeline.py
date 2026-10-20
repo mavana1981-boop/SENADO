@@ -1,4 +1,7 @@
 """Testes com dados reais do Senado (sessão de 12/12/2023, PL 3.626/2023) no formato exato da API.
+Fixtures ceaps_adm.json, senador_detalhe/comissoes/cargos.json: respostas reais da API, copiadas do
+projeto senado-br-mcp (licença MIT, ver LICENSE-senado-br-mcp.txt). processos_5894.json e
+ceaps_sintetico.json seguem o formato real dos serviços, com conteúdo montado para o teste.
 
 Rodar:  python -m pytest -q tests   (ou: python tests/test_pipeline.py)
 """
@@ -12,6 +15,10 @@ RAIZ = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures"
 _tmp = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_tmp}/teste.db")
+os.environ["ADMIN_USER"] = "admin"
+os.environ["ADMIN_PASSWORD"] = "senha-de-teste-123"
+os.environ["SECRET_KEY"] = "teste"
+os.environ.pop("RAILWAY_ENVIRONMENT", None)
 sys.path.insert(0, str(RAIZ))
 
 import collector  # noqa: E402
@@ -28,10 +35,29 @@ def _carregar():
         collector.coletar_senadores(conn=c, docs=docs)
         collector.gravar_votacoes(json.loads((FIX / "orientacao_202312.json").read_text()), c)
         collector.vincular_senadores(c)
+        ceaps = json.loads((FIX / "ceaps_adm.json").read_text()) + \
+            json.loads((FIX / "ceaps_sintetico.json").read_text())
+        collector.gravar_ceaps(c, 2025, collector.parse_ceaps_adm(ceaps))
+        collector.gravar_processos(c, 5894, "flavio bolsonaro",
+                                   json.loads((FIX / "processos_5894.json").read_text()))
+        collector.gravar_perfil(c, 5672, *(json.loads((FIX / f).read_text()) for f in
+                                          ("senador_detalhe.json", "senador_comissoes.json",
+                                           "senador_cargos.json")))
         collector.marcar_coleta(c)
 
 
 _carregar()
+
+
+def _cliente():
+    import app as painel
+    cli = painel.app.test_client()
+    html = cli.get("/login").get_data(as_text=True)
+    import re
+    tok = re.search(r'name="_csrf" value="([^"]+)"', html).group(1)
+    r = cli.post("/login", data={"_csrf": tok, "login": "admin", "senha": "senha-de-teste-123"})
+    assert r.status_code == 302, "login falhou"
+    return cli
 
 
 def test_votacao_real_contagens():
@@ -94,15 +120,153 @@ def test_fidelidade_e_participacao():
 
 
 def test_paginas_renderizam():
-    import app as painel
-    cli = painel.app.test_client()
+    cli = _cliente()
     for url in ["/orientacoes", "/orientacoes?opostas=0", "/orientacoes?partido=PL&opostas=0&opostas=1",
                 "/rankings", "/rankings?uf=RJ", "/perfil", "/saude"]:
         r = cli.get(url)
         assert r.status_code == 200, url
     html = cli.get("/orientacoes").get_data(as_text=True)
     assert "Flávio Bolsonaro" in html and "Emenda nº 147" in html
-    assert cli.post("/api/coletar").status_code == 403
+    assert _anonimo().post("/api/coletar").status_code == 403
+
+
+def test_aba_votacoes():
+    d = metrics.detalhe_votacao(9534)
+    assert d["contagem"]["SIM"] == 45 and d["contagem"]["NÃO"] == 23
+    assert d["gov"] == "NÃO" and d["opo"] == "SIM"
+    assert d["orientacoes"][0]["lideranca"] == "Governo"       # institucionais primeiro
+    pl = next(p for p in d["placar"] if p["partido"] == "PL")
+    assert pl["orientacao"] == "SIM" and pl["NÃO"] == 1         # Romário
+    nomes = {r["nome"] for r in d["traidores"]}
+    assert "Romário" in nomes and "Flávio Bolsonaro" not in nomes
+    sec = metrics.detalhe_votacao(9557)
+    assert sec["votacao"]["secreta"] and sec["traidores"] == []
+    assert sec["contagem"]["SIM"] == 41                         # placar oficial da secreta
+    achou = metrics.lista_votacoes(metrics.Filtros(), "PL 3626")
+    assert {v["id"] for v in achou} >= {9534}
+    assert metrics.lista_votacoes(metrics.Filtros(), "inexistentexyz") == []
+    cli = _cliente()
+    html = cli.get("/votacoes").get_data(as_text=True)
+    assert "Emenda nº 147" in html and "Votos nominais" in html   # padrão = mais recente não secreta
+    assert cli.get("/votacoes?id=9557").status_code == 200
+    assert cli.get("/votacoes?busca=3626/2023").status_code == 200
+    assert cli.get("/votacoes?id=999999").status_code == 200
+
+
+def _anonimo():
+    import app as painel
+    return painel.app.test_client()
+
+
+def test_login_obrigatorio_e_seguranca():
+    anon = _anonimo()
+    for url in ["/", "/orientacoes", "/perfil", "/cota", "/usuarios"]:
+        r = anon.get(url)
+        assert r.status_code == 302 and "/login" in r.headers["Location"], url
+    assert anon.get("/saude").status_code == 200
+    assert anon.get("/static/style.css").status_code == 200
+    # senha errada não entra; post sem CSRF é rejeitado
+    assert anon.post("/login", data={"login": "admin", "senha": "x"}).status_code == 400
+    html = anon.get("/login").get_data(as_text=True)
+    assert "plenario.svg" in html and "Painel do Senado" in html
+    import re
+    tok = re.search(r'name="_csrf" value="([^"]+)"', html).group(1)
+    r = anon.post("/login", data={"_csrf": tok, "login": "admin", "senha": "errada"})
+    assert "inválidos" in r.get_data(as_text=True)
+    # redirecionamento só para caminhos internos
+    r = anon.post("/login", data={"_csrf": tok, "login": "admin", "senha": "senha-de-teste-123",
+                                  "proximo": "https://site-malicioso.com"})
+    assert r.headers["Location"].endswith("/") or "orientacoes" in r.headers["Location"]
+
+
+def test_gestao_de_usuarios():
+    import re
+    cli = _cliente()
+    html = cli.get("/usuarios").get_data(as_text=True)
+    tok = re.search(r'name="_csrf" value="([^"]+)"', html).group(1)
+    cli.post("/usuarios", data={"_csrf": tok, "acao": "criar", "login": "Assessor",
+                                "nome": "Assessor", "senha": "outra-senha-1"})
+    assert "assessor" in cli.get("/usuarios").get_data(as_text=True)
+    # o novo usuário (sem admin) entra, mas não acessa a gestão
+    c2 = _anonimo()
+    t2 = re.search(r'name="_csrf" value="([^"]+)"', c2.get("/login").get_data(as_text=True)).group(1)
+    assert c2.post("/login", data={"_csrf": t2, "login": "assessor", "senha": "outra-senha-1"}).status_code == 302
+    assert c2.get("/orientacoes").status_code == 200
+    assert c2.get("/usuarios").status_code == 403
+    # desativado perde a sessão na hora
+    from db import usuarios as tu
+    with engine.connect() as c:
+        uid = c.execute(text("SELECT id FROM usuarios WHERE login='assessor'")).scalar()
+    cli.post("/usuarios", data={"_csrf": tok, "acao": "alternar", "id": uid})
+    assert c2.get("/orientacoes").status_code == 302
+    assert tu is not None
+
+
+def test_ceaps_e_cota():
+    import paineis
+    import cota
+    assert cota.teto_mensal("DF", 2023, 6) == 22307.91
+    assert cota.teto_mensal("DF", 2024, 6) == round(22307.91 * 1.06, 2)
+    assert cota.teto_mensal("AM", 2025, 3) == round(46933.20 * 1.06 * 1.0613, 2)
+    with engine.connect() as c:
+        assert c.execute(text("SELECT COUNT(*) FROM despesas WHERE codigo_senador=5973")).scalar() == 3
+    d = paineis.cota_senador(5894)
+    assert d["total"]["gasto"] == 35000.5
+    r25 = d["resumo"][0]
+    assert r25["ano"] == 2025 and r25["meses"] == 12          # em exercício: ano inteiro
+    assert r25["economia"] == round(r25["disponivel"] - 35000.5, 2)
+    assert d["categorias"][0]["tipo"] == "Divulgação da atividade parlamentar"
+    rk = paineis.ranking_economia()
+    assert any(x["codigo"] == 5894 for x in rk)
+    # plano B: CSV da Transparência
+    csv_txt = ('"ULTIMA ATUALIZACAO";"01/10/2025"\n'
+               'ANO;MES;SENADOR;TIPO_DESPESA;CNPJ_CPF;FORNECEDOR;DOCUMENTO;DATA;DETALHAMENTO;VALOR_REEMBOLSADO;COD_DOCUMENTO\n'
+               '2025;3;FLÁVIO BOLSONARO;Aluguel;00.000.000/0001-00;X LTDA;12;15/03/2025;;1.234,56;2200001\n')
+    linhas = collector.parse_ceaps_csv(csv_txt, 2025, {"flavio bolsonaro": 5894})
+    assert linhas[0]["valor"] == 1234.56 and linhas[0]["codigo_senador"] == 5894
+    assert linhas[0]["data"] == "2025-03-15" and linhas[0]["id"] == 2200001
+
+
+def test_proposicoes():
+    import paineis
+    p = paineis.proposicoes(5894)
+    assert p["total"] == 4 and p["principal"] == 3        # PEC 1/2025 é do Izalci (coautoria)
+    assert p["normas"] == 1 and p["tramitando"] == 2
+    assert p["projetos"] == 3                              # PDL, PEC, PL (REQ não conta)
+    assert paineis.proposicoes(5894, papel="coautor")["total"] == 1
+    assert paineis.proposicoes(5894, situacao="norma")["itens"][0]["identificacao"] == "PL 2100/2023"
+    assert paineis.proposicoes(5894, busca="decreto")["total"] == 1
+    rk = paineis.ranking_proposicoes()
+    assert rk[0]["codigo"] == 5894 and rk[0]["n"] == 2     # PDL + PL como 1º autor
+
+
+def test_perfil():
+    import paineis
+    pf = paineis.perfil(5672)
+    assert pf["basicos"]["naturalidade"] == "Rio Branco"
+    assert pf["basicos"]["email"] == "sen.alanrick@senado.leg.br"
+    siglas = {c["sigla"] for c in pf["comissoes"]}
+    assert "GPARGENTINA" in siglas and "GPBOLIVIA" not in siglas   # encerradas ficam fora
+    assert {c["sigla"] for c in pf["cargos"]} == {"FPE", "GPISRAEL"}  # presidência da CRA terminou
+    ind = paineis.indicadores_senador(5894)
+    assert ind["opo"] == 100.0 and ind["participacao"] is not None
+
+
+def test_abas_novas_renderizam():
+    cli = _cliente()
+    for url in ["/perfil?senador=5672", "/perfil?senador=5894", "/proposicoes?senador=5894",
+                "/proposicoes?senador=5894&papel=autor&situacao=norma", "/cota?senador=5894",
+                "/cota?senador=5894&ano=2025", "/cota?senador=5973", "/rankings", "/conta", "/usuarios",
+                "/perfil?senador=999999"]:
+        r = cli.get(url)
+        assert r.status_code == 200, url
+    html = cli.get("/cota?senador=5894").get_data(as_text=True)
+    assert "IMOBILIARIA X LTDA" in html and "R$ 15.000,00" in html
+    html = cli.get("/proposicoes?senador=5894").get_data(as_text=True)
+    assert "PL 2100/2023" in html and "TRANSFORMADA" in html
+    html = cli.get("/perfil?senador=5672").get_data(as_text=True)
+    assert "Rio Branco" in html
+    assert cli.get("/inexistente").status_code == 404
 
 
 if __name__ == "__main__":

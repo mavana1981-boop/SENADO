@@ -1,0 +1,47 @@
+[
+ {
+  "ano": 2025,
+  "codSenador": 5894,
+  "cpfCnpj": "00.000.000/0001-00",
+  "data": "2025-01-15",
+  "detalhamento": null,
+  "documento": "1000",
+  "fornecedor": "IMOBILIARIA X LTDA",
+  "id": 9000000,
+  "mes": 1,
+  "nomeSenador": "FLÁVIO BOLSONARO",
+  "tipoDespesa": "Aluguel de imóveis para escritório político",
+  "tipoDocumento": "Nota Fiscal",
+  "valorReembolsado": 12000
+ },
+ {
+  "ano": 2025,
+  "codSenador": 5894,
+  "cpfCnpj": "00.000.000/0001-01",
+  "data": "2025-02-15",
+  "detalhamento": null,
+  "documento": "1001",
+  "fornecedor": "POSTO Y",
+  "id": 9000001,
+  "mes": 2,
+  "nomeSenador": "FLÁVIO BOLSONARO",
+  "tipoDespesa": "Locomoção, hospedagem, alimentação, combustíveis e lubrificantes",
+  "tipoDocumento": "Nota Fiscal",
+  "valorReembolsado": 8000.5
+ },
+ {
+  "ano": 2025,
+  "codSenador": 5894,
+  "cpfCnpj": "00.000.000/0001-02",
+  "data": "2025-03-15",
+  "detalhamento": null,
+  "documento": "1002",
+  "fornecedor": "GRAFICA Z",
+  "id": 9000002,
+  "mes": 3,
+  "nomeSenador": "FLÁVIO BOLSONARO",
+  "tipoDespesa": "Divulgação da atividade parlamentar",
+  "tipoDocumento": "Nota Fiscal",
+  "valorReembolsado": 15000
+ }
+]

@@ -22,7 +22,7 @@
 {% block conteudo %}
 {{ m.filtros(f, op) }}
 
-<section class="grade">
+<section class="grade larga">
   <div class="card opo">
     <h2>Oposicionismo <small>mín. 10 votos</small></h2>
     {{ tabela(oposicionismo, 'opo', 'seguiu', 'total', 'Votos') }}
@@ -37,9 +37,36 @@
     <p class="nota">Votações em que registrou voto ÷ votações realizadas entre o primeiro e o último voto do senador no período — assim suplentes e quem assumiu no meio do mandato não são penalizados pelo tempo fora.</p>
   </div>
   <div class="card neu">
-    <h2>Fidelidade ao próprio partido</h2>
+    <h2>Fidelidade ao próprio partido <small>mín. 10 votos</small></h2>
     {{ tabela(fidelidade, 'neu', 'seguiu', 'total', 'Votos') }}
     <p class="nota">Votos iguais à orientação do partido do senador na data da votação.</p>
+  </div>
+  <div class="card neu">
+    <h2>Apresentação de projetos <small>1º autor · PL, PLP, PEC, PDL, PRS</small></h2>
+    <div class="rolagem">
+    {% if projetos %}
+    <table><thead><tr><th class="rank">#</th><th>Senador(a)</th><th class="n">Projetos</th><th class="n m-esc">Normas</th></tr></thead><tbody>
+    {% for s in projetos %}
+      <tr><td class="rank">{{ loop.index }}</td><td><a href="{{ url_for('proposicoes', senador=s.codigo, papel='autor') }}" style="text-decoration:none">{{ m.senador(s) }}</a></td>
+          <td class="n"><b>{{ s.n }}</b></td><td class="n m-esc" style="color:var(--suave)">{{ s.normas or '' }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% else %}<div class="vazio-msg">Sem dados neste recorte.</div>{% endif %}
+    </div>
+  </div>
+  <div class="card neu">
+    <h2>Economia na cota (CEAPS) <small>% da cota não utilizada</small></h2>
+    <div class="rolagem">
+    {% if economia %}
+    <table><thead><tr><th class="rank">#</th><th>Senador(a)</th><th class="n m-esc">Economia</th><th>%</th></tr></thead><tbody>
+    {% for s in economia %}
+      <tr><td class="rank">{{ loop.index }}</td><td><a href="{{ url_for('cota', senador=s.codigo) }}" style="text-decoration:none">{{ m.senador(s) }}</a></td>
+          <td class="n m-esc" style="white-space:nowrap">{{ s.economia|brl(0) }}</td><td>{{ m.barra(s.pct, 'neu') }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% else %}<div class="vazio-msg">Sem dados de cota.</div>{% endif %}
+    </div>
+    <p class="nota">Considera os anos do filtro de período (padrão: 2023 até hoje).</p>
   </div>
 </section>
 {% endblock %}
