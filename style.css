@@ -198,10 +198,13 @@ td.c,th.c{text-align:center}
 .form-linha input,.form-linha select{font:inherit;padding:7px 9px;border:1px solid var(--linha);border-radius:6px}
 .mini{font:inherit;font-size:12px;padding:4px 8px;border-radius:5px;border:1px solid var(--linha);background:#fff;cursor:pointer}
 .mini.perigo{color:#a12a1d;border-color:#f0c2bc}
-.rodape{max-width:1280px;margin:0 auto;padding:6px 16px 24px;font-size:11px;color:var(--suave)}
+.rodape{max-width:1280px;margin:0 auto;padding:6px 16px 24px;font-size:11px;color:var(--suave);
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 16px}
+.rodape .credito{opacity:.75}
+.credito .nw{white-space:nowrap}
 
 /* ---------------- tela de login ---------------- */
-.login-pg{min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;padding:24px 16px;
+.login-pg{min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;padding:24px 16px 84px;
   background:radial-gradient(120% 90% at 50% 110%,#123f7d 0%,#0a2b58 45%,#061b38 100%);position:relative;overflow:hidden}
 .login-pg .plenario{position:absolute;left:50%;bottom:-2%;transform:translateX(-50%);width:min(1500px,160vw);
   height:auto;opacity:.16;pointer-events:none}
@@ -223,7 +226,8 @@ td.c,th.c{text-align:center}
 .login-card .erro{background:#fdecea;color:#a12a1d;border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:14px}
 .login-card .info{background:#fff7e6;color:#7a5a12;border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:14px;line-height:1.45}
 .login-card .rod{text-align:center;font-size:11px;color:#8693a6;margin-top:18px;line-height:1.5}
-.login-legenda{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:rgba(255,255,255,.45);font-size:11px;letter-spacing:.5px}
+.login-legenda{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:rgba(255,255,255,.45);font-size:11px;letter-spacing:.5px;padding:0 12px}
+.login-legenda .credito{display:block;margin-top:4px;font-size:10.5px;letter-spacing:.2px;color:rgba(255,255,255,.38)}
 @media (max-width:640px){
   .usr .quem{display:none}
   .marca small{display:none}
