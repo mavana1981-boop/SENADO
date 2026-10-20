@@ -4,7 +4,9 @@ import os
 import threading
 from datetime import date
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import (Flask, abort, jsonify, redirect, render_template, request, send_from_directory,
+                   session, url_for)
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 import auth
 import metrics
@@ -12,17 +14,41 @@ import paineis
 from db import init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-app = Flask(__name__)
+RAIZ = os.path.dirname(os.path.abspath(__file__))
+# static_folder=None: os arquivos estáticos são servidos pela rota /static abaixo, que aceita
+# tanto a pasta static/ quanto arquivos soltos na raiz (upload pelo site do GitHub costuma achatar pastas)
+app = Flask(__name__, static_folder=None)
+app.jinja_loader = ChoiceLoader([FileSystemLoader(os.path.join(RAIZ, "templates")),
+                                 FileSystemLoader(RAIZ)])
 
-# Confere no boot se todos os arquivos de tela foram enviados ao repositório
-_NECESSARIOS = ["templates/" + t for t in (
-    "base.html", "_macros.html", "_selo.html", "login.html", "conta.html", "usuarios.html", "erro.html",
-    "vazio.html", "perfil.html", "proposicoes.html", "cota.html", "votacoes.html", "orientacoes.html",
-    "rankings.html")] + ["static/style.css", "static/plenario.svg", "static/favicon.svg"]
-_faltando = [f for f in _NECESSARIOS if not os.path.exists(os.path.join(app.root_path, f))]
+TEMPLATES = ("base.html", "_macros.html", "_selo.html", "login.html", "conta.html", "usuarios.html",
+             "erro.html", "vazio.html", "perfil.html", "proposicoes.html", "cota.html", "votacoes.html",
+             "orientacoes.html", "rankings.html")
+ESTATICOS = ("style.css", "plenario.svg", "favicon.svg")
+
+
+def _achar(nome, pasta):
+    for base in (os.path.join(RAIZ, pasta), RAIZ):
+        if os.path.isfile(os.path.join(base, nome)):
+            return base
+    return None
+
+
+_faltando = [t for t in TEMPLATES if not _achar(t, "templates")] + \
+            [e for e in ESTATICOS if not _achar(e, "static")]
 if _faltando:
-    logging.error("ARQUIVOS FALTANDO NO DEPLOY (suba as pastas templates/ e static/ completas): %s",
-                  ", ".join(_faltando))
+    logging.error("ARQUIVOS FALTANDO NO DEPLOY: %s", ", ".join(_faltando))
+
+
+@app.route("/static/<path:filename>")
+def static(filename):
+    nome = filename
+    if nome not in ESTATICOS:          # só os arquivos do app — nunca expõe .py ou outros da raiz
+        abort(404)
+    base = _achar(nome, "static")
+    if not base:
+        abort(404)
+    return send_from_directory(base, nome, max_age=3600)
 
 init_db()
 auth.configurar(app)
