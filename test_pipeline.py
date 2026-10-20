@@ -166,7 +166,9 @@ def test_login_obrigatorio_e_seguranca():
     assert anon.get("/saude").status_code == 200
     assert anon.get("/static/style.css").status_code == 200
     # senha errada não entra; post sem CSRF é rejeitado
-    assert anon.post("/login", data={"login": "admin", "senha": "x"}).status_code == 400
+    r = anon.post("/login", data={"login": "admin", "senha": "senha-de-teste-123"})
+    assert r.status_code == 200 and "novamente" in r.get_data(as_text=True)   # sem CSRF não entra
+    assert anon.get("/orientacoes").status_code == 302                     # continua deslogado
     html = anon.get("/login").get_data(as_text=True)
     assert "plenario.svg" in html and "Painel do Senado" in html
     import re

@@ -27,11 +27,7 @@ SENHA_MIN = 8
 # ---------------- configuração ----------------
 
 def configurar(app):
-    chave = os.environ.get("SECRET_KEY")
-    if not chave:
-        chave = secrets.token_hex(32)
-        log.warning("SECRET_KEY não definida: sessões serão perdidas a cada reinício. "
-                    "Defina SECRET_KEY nas variáveis do Railway.")
+    chave = os.environ.get("SECRET_KEY") or _chave_persistente()
     app.config.update(
         SECRET_KEY=chave,
         SESSION_COOKIE_HTTPONLY=True,
@@ -43,6 +39,23 @@ def configurar(app):
     app.before_request(_exigir_login)
     app.context_processor(lambda: {"usuario": g.get("usuario"), "csrf_token": csrf_token})
     criar_admin_inicial()
+
+
+def _chave_persistente():
+    """Sem SECRET_KEY no ambiente, usa uma chave gerada uma única vez e guardada no banco.
+    Assim o login sobrevive a reinícios e funciona com mais de um processo/réplica."""
+    from db import meta
+    with engine.begin() as c:
+        v = c.execute(select(meta.c.valor).where(meta.c.chave == "secret_key")).scalar()
+        if not v:
+            try:
+                c.execute(insert(meta).values(chave="secret_key", valor=secrets.token_hex(32)))
+            except Exception:
+                pass  # outro processo criou ao mesmo tempo
+    with engine.connect() as c:
+        v = c.execute(select(meta.c.valor).where(meta.c.chave == "secret_key")).scalar()
+    log.info("SECRET_KEY não definida no ambiente: usando chave persistente guardada no banco.")
+    return v
 
 
 def criar_admin_inicial():
@@ -74,9 +87,13 @@ def csrf_token():
     return session["_csrf"]
 
 
-def _checar_csrf():
+def _csrf_ok():
     enviado = request.form.get("_csrf", "")
-    if not enviado or not hmac.compare_digest(enviado, session.get("_csrf", "")):
+    return bool(enviado) and hmac.compare_digest(enviado, session.get("_csrf", ""))
+
+
+def _checar_csrf():
+    if not _csrf_ok():
         abort(400, "Formulário expirado. Recarregue a página e tente de novo.")
 
 
@@ -132,8 +149,13 @@ def login():
     if session.get("uid") and request.method == "GET":
         return redirect(url_for("index"))
     erro = None
+    if request.method == "POST" and not _csrf_ok():
+        session.pop("_csrf", None)
+        return render_template("login.html", sem_usuarios=not ha_usuarios(),
+                               erro="A tela de login ficou aberta por muito tempo ou o servidor foi "
+                                    "reiniciado. Digite usuário e senha novamente.",
+                               proximo=request.form.get("proximo") or "")
     if request.method == "POST":
-        _checar_csrf()
         login_ = (request.form.get("login") or "").strip().lower()
         senha = request.form.get("senha") or ""
         ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
