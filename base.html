@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titulo %}Painel do Senado{% endblock %} · Oposição</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topo">
+  <div class="topo-in">
+    <div class="marca">Painel do Senado<small>Liderança da Oposição · 57ª Legislatura</small></div>
+    <nav class="abas">
+      {% for slug, nome in abas %}
+        <a href="{{ url_for(slug) if slug in prontas else url_for('em_breve', aba=slug) }}{% if slug in prontas and request.query_string %}?{{ request.query_string.decode() }}{% endif %}"
+           class="{{ 'ativa' if aba == slug }} {{ '' if slug in prontas else 'off' }}">{{ nome }}</a>
+      {% endfor %}
+    </nav>
+    {% if op and op.ultima_coleta %}<div class="coleta">Dados de {{ op.ultima_coleta|data }}</div>{% endif %}
+  </div>
+</header>
+<main>
+{% block conteudo %}{% endblock %}
+</main>
+</body>
+</html>

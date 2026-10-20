@@ -1,0 +1,40 @@
+{% macro senador(s) -%}
+<div class="sen">
+  <span class="ph"{% if s.foto %} style="background-image:url('{{ s.foto }}')"{% endif %}></span>
+  <div style="min-width:0">
+    <div class="nm">{{ s.nome }}{% if s.em_exercicio is sameas false %}<span class="fora" title="Não está em exercício hoje">fora</span>{% endif %}</div>
+    <div class="pt">{{ s.partido or '—' }}{% if s.uf %}-{{ s.uf }}{% endif %}</div>
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro barra(pct, tipo) -%}
+<div class="barra {{ tipo }}"><span class="t"><i style="width:{{ pct or 0 }}%"></i></span><b>{{ pct|pct }}</b></div>
+{%- endmacro %}
+
+{% macro heat(pct, tipo) -%}
+{% if pct is none %}<td class="heat" style="color:#bbb">—</td>
+{% else %}
+{% set a = (pct / 100) * 0.55 %}
+<td class="heat" style="background:{{ 'rgba(192,57,43,%.2f)'|format(a) if tipo=='gov' else 'rgba(31,95,191,%.2f)'|format(a) }}">{{ pct|pct }}</td>
+{% endif %}
+{%- endmacro %}
+
+{% macro filtros(f, op, mostrar_opostas=True) -%}
+<form class="filtros" method="get">
+  <label>De<input type="date" name="inicio" value="{{ f.inicio or '' }}"></label>
+  <label>Até<input type="date" name="fim" value="{{ f.fim or '' }}"></label>
+  <label>Partido<select name="partido"><option value="">Todos</option>
+    {% for p in op.partidos %}<option {{ 'selected' if f.partido == p }}>{{ p }}</option>{% endfor %}</select></label>
+  <label>UF<select name="uf"><option value="">Todas</option>
+    {% for u in op.ufs %}<option {{ 'selected' if f.uf == u }}>{{ u }}</option>{% endfor %}</select></label>
+  <label>Matéria<select name="sigla"><option value="">Todas</option>
+    {% for s in op.siglas %}<option {{ 'selected' if f.sigla == s }}>{{ s }}</option>{% endfor %}</select></label>
+  {% if mostrar_opostas %}
+  <input type="hidden" name="opostas" value="0">
+  <label class="chk"><input type="checkbox" name="opostas" value="1" {{ 'checked' if f.opostas }}> Só orientações opostas (Gov × Oposição)</label>
+  {% endif %}
+  <button class="btn">Filtrar</button>
+  <a class="btn sec" href="{{ request.path }}">Limpar</a>
+</form>
+{%- endmacro %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block titulo %}{{ titulo }}{% endblock %}
+{% block conteudo %}
+<div class="embreve">
+  <h2 style="margin-top:0;color:var(--tinta)">{{ titulo }}</h2>
+  <p>Esta aba entra na próxima etapa. As abas <b>Orientações</b> e <b>Rankings</b> já estão funcionando.</p>
+  <a class="btn" href="{{ url_for('orientacoes') }}">Ir para Orientações</a>
+</div>
+{% endblock %}
