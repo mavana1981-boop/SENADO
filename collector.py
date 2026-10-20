@@ -113,7 +113,8 @@ def _parlamentares(doc: dict):
 def coletar_senadores(conn=None, docs=None):
     """docs: (doc_legislatura, doc_atual) — usado nos testes; em produção busca na API."""
     if docs is None:
-        doc_leg = get_json(f"/senador/lista/legislatura/{LEGISLATURA}.json")
+        # exercicio=S: só quem efetivamente assumiu (sem isso vêm todos os suplentes)
+        doc_leg = get_json(f"/senador/lista/legislatura/{LEGISLATURA}.json?exercicio=S")
         doc_atual = get_json("/senador/lista/atual.json")
     else:
         doc_leg, doc_atual = docs
@@ -272,6 +273,24 @@ def vincular_senadores(conn):
             ligados += 1
     log.info("nomes vinculados a senadores: %d de %d", ligados, len(pares))
     return ligados
+
+
+def limpar_senadores_sem_atividade(conn):
+    """Remove do cadastro quem não está em exercício e não tem voto nem despesa registrados
+    (ex.: suplentes que nunca assumiram)."""
+    from sqlalchemy import exists
+    sem_voto = ~exists().where(votos.c.codigo_senador == senadores.c.codigo)
+    sem_desp = ~exists().where(despesas.c.codigo_senador == senadores.c.codigo)
+    alvo = [r[0] for r in conn.execute(select(senadores.c.codigo).where(
+        senadores.c.em_exercicio.is_not(True), sem_voto, sem_desp))]
+    if alvo:
+        conn.execute(delete(autorias).where(autorias.c.codigo_senador.in_(alvo)))
+        conn.execute(delete(perfis).where(perfis.c.codigo.in_(alvo)))
+        conn.execute(delete(senadores).where(senadores.c.codigo.in_(alvo)))
+        # proposições que ficaram sem nenhum autor no cadastro
+        conn.execute(delete(processos).where(~exists().where(autorias.c.processo_id == processos.c.id)))
+    log.info("senadores sem atividade removidos do cadastro: %d", len(alvo))
+    return len(alvo)
 
 
 def marcar_coleta(conn):
@@ -488,11 +507,22 @@ def coletar_perfis(codigos=None):
 
 
 def _passo(nome, fn, *a):
-    """Uma etapa que falha não derruba as outras."""
+    """Uma etapa que falha não derruba as outras. Registra a conclusão em `meta`."""
     try:
         fn(*a)
     except Exception:
         log.exception("etapa %s falhou", nome)
+        return False
+    with engine.begin() as c:
+        chave = f"etapa_ok:{nome}"
+        c.execute(delete(meta).where(meta.c.chave == chave))
+        c.execute(insert(meta).values(chave=chave, valor=datetime.now().isoformat(timespec="seconds")))
+    return True
+
+
+def _etapa_concluida(nome):
+    with engine.connect() as c:
+        return c.execute(select(meta.c.valor).where(meta.c.chave == f"etapa_ok:{nome}")).first() is not None
 
 
 def executar(desde: date | None = None, so_senadores=False):
@@ -511,10 +541,14 @@ def executar(desde: date | None = None, so_senadores=False):
         inicio_ceaps = int(INICIO_LEGISLATURA[:4]) if completa else (
             hoje.year - 1 if hoje.month <= 3 else hoje.year)
         _passo("CEAPS", coletar_ceaps, range(inicio_ceaps, hoje.year + 1))
+        with engine.begin() as c:
+            limpar_senadores_sem_atividade(c)
         _passo("proposições", coletar_processos)
         _passo("perfis", coletar_perfis)
     with engine.begin() as c:
         vincular_senadores(c)
+        if not so_senadores:
+            limpar_senadores_sem_atividade(c)
         marcar_coleta(c)
 
 
@@ -522,22 +556,29 @@ def carga_inicial_se_vazio():
     """Usado no primeiro deploy: se o banco estiver vazio, coleta a legislatura inteira."""
     init_db()
     with engine.connect() as c:
-        tem = {t.name: c.execute(select(t).limit(1)).first() is not None
-               for t in (votacoes, despesas, processos, perfis)}
-    if not tem["votacoes"]:
+        tem_votacoes = c.execute(select(votacoes.c.id).limit(1)).first() is not None
+    # uma etapa só conta como feita se terminou (deploy no meio da carga não deixa dados pela metade)
+    tem = {"despesas": _etapa_concluida("CEAPS"), "processos": _etapa_concluida("proposições"),
+           "perfis": _etapa_concluida("perfis")}
+    if not tem_votacoes:
         log.info("banco vazio — carga completa desde %s", INICIO_LEGISLATURA)
         executar(date.fromisoformat(INICIO_LEGISLATURA))
         return
     # banco de uma versão anterior: completa só o que falta
     coletar_senadores()
+    with engine.begin() as c:
+        vincular_senadores(c)
     if not tem["despesas"]:
         _passo("CEAPS", coletar_ceaps, range(int(INICIO_LEGISLATURA[:4]), date.today().year + 1))
+    with engine.begin() as c:
+        limpar_senadores_sem_atividade(c)
     if not tem["processos"]:
         _passo("proposições", coletar_processos)
     if not tem["perfis"]:
         _passo("perfis", coletar_perfis)
     with engine.begin() as c:
         vincular_senadores(c)
+        limpar_senadores_sem_atividade(c)
         marcar_coleta(c)
 
 
@@ -547,8 +588,14 @@ if __name__ == "__main__":
     ap.add_argument("--desde", help="AAAA-MM-DD (carga completa a partir desta data)")
     ap.add_argument("--senadores", action="store_true", help="só o cadastro de senadores")
     ap.add_argument("--se-vazio", action="store_true", help="carga completa só se o banco estiver vazio")
+    ap.add_argument("--limpar", action="store_true", help="só remove senadores sem atividade (suplentes que não assumiram)")
     a = ap.parse_args()
-    if a.se_vazio:
+    if a.limpar:
+        init_db()
+        with engine.begin() as c:
+            vincular_senadores(c)
+            limpar_senadores_sem_atividade(c)
+    elif a.se_vazio:
         carga_inicial_se_vazio()
     else:
         executar(date.fromisoformat(a.desde) if a.desde else None, a.senadores)

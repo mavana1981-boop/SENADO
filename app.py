@@ -13,6 +13,17 @@ from db import init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 app = Flask(__name__)
+
+# Confere no boot se todos os arquivos de tela foram enviados ao repositório
+_NECESSARIOS = ["templates/" + t for t in (
+    "base.html", "_macros.html", "_selo.html", "login.html", "conta.html", "usuarios.html", "erro.html",
+    "vazio.html", "perfil.html", "proposicoes.html", "cota.html", "votacoes.html", "orientacoes.html",
+    "rankings.html")] + ["static/style.css", "static/plenario.svg", "static/favicon.svg"]
+_faltando = [f for f in _NECESSARIOS if not os.path.exists(os.path.join(app.root_path, f))]
+if _faltando:
+    logging.error("ARQUIVOS FALTANDO NO DEPLOY (suba as pastas templates/ e static/ completas): %s",
+                  ", ".join(_faltando))
+
 init_db()
 auth.configurar(app)
 
