@@ -41,7 +41,7 @@ sess.headers.update({"Accept": "application/json",
 
 # ---------------- HTTP ----------------
 
-def get_json(caminho: str, tentativas: int = 5):
+def get_json(caminho: str, tentativas: int = 7):
     url = caminho if caminho.startswith("http") else f"{BASE}{caminho}"
     for i in range(tentativas):
         try:
@@ -58,7 +58,7 @@ def get_json(caminho: str, tentativas: int = 5):
         if r.status_code == 404:
             return None
         if r.status_code in (429, 503, 502, 504):
-            espera = 5 * (i + 1)
+            espera = min(60, 5 * 2 ** i)  # 5, 10, 20, 40, 60, 60 s
             log.warning("HTTP %s em %s — aguardando %ss", r.status_code, url, espera)
             time.sleep(espera)
             continue
@@ -232,16 +232,63 @@ def _meses(inicio: date, fim: date):
         atual = prox
 
 
+def _meses_pendentes(conn=None):
+    def _ler(c):
+        v = c.execute(select(meta.c.valor).where(meta.c.chave == "votacoes_meses_pendentes")).scalar()
+        return set(filter(None, (v or "").split(",")))
+    if conn is not None:
+        return _ler(conn)
+    with engine.connect() as c:
+        return _ler(c)
+
+
+def _salvar_pendentes(conn, pendentes):
+    conn.execute(delete(meta).where(meta.c.chave == "votacoes_meses_pendentes"))
+    if pendentes:
+        conn.execute(insert(meta).values(chave="votacoes_meses_pendentes", valor=",".join(sorted(pendentes))))
+
+
 def coletar_votacoes(desde: date, ate: date) -> int:
-    total = 0
-    for ini, fim in _meses(desde, ate):
-        doc = get_json(f"/plenario/votacao/orientacaoBancada/"
-                       f"{ini:%Y%m%d}/{fim:%Y%m%d}.json")
+    """Baixa mês a mês. Um mês que falhar não interrompe os seguintes: fica anotado como
+    pendente e é refeito automaticamente na próxima coleta."""
+    pendentes = _meses_pendentes()
+    meses = {(ini.replace(day=1)): (ini, fim) for ini, fim in _meses(desde, ate)}
+    for p in pendentes:  # inclui meses que falharam em coletas anteriores
+        ini = date.fromisoformat(p)
+        fim = min((ini + timedelta(days=32)).replace(day=1) - timedelta(days=1), ate)
+        meses.setdefault(ini, (ini, fim))
+    total, falhas = 0, set()
+    for chave in sorted(meses):
+        ini, fim = meses[chave]
+        try:
+            doc = get_json(f"/plenario/votacao/orientacaoBancada/{ini:%Y%m%d}/{fim:%Y%m%d}.json")
+        except Exception as e:
+            log.error("votações de %s a %s não baixadas (%s) — ficam para a próxima coleta", ini, fim, e)
+            falhas.add(chave.isoformat())
+            continue
         with engine.begin() as c:
             n = gravar_votacoes(doc, c)
         log.info("%s a %s: %d votações", ini, fim, n)
         total += n
+    with engine.begin() as c:
+        resolvidos = {k.isoformat() for k in meses} - falhas
+        _salvar_pendentes(c, (pendentes - resolvidos) | falhas)
     return total
+
+
+def inicio_atualizacao_votacoes(hoje=None) -> date:
+    """Coleta diária: desde a última votação no banco (com folga de 30 dias), nunca menos de 45 dias.
+    Assim qualquer buraco deixado por uma coleta interrompida é preenchido sozinho."""
+    from sqlalchemy import func
+    hoje = hoje or date.today()
+    with engine.connect() as c:
+        ultima = c.execute(select(func.max(votacoes.c.data))).scalar()
+    padrao = hoje - timedelta(days=45)
+    if not ultima:
+        return date.fromisoformat(INICIO_LEGISLATURA)
+    if isinstance(ultima, str):
+        ultima = datetime.fromisoformat(ultima)
+    return min(padrao, ultima.date() - timedelta(days=30))
 
 
 # ---------------- Cruzamento nome do voto -> código do senador ----------------
@@ -532,7 +579,7 @@ def executar(desde: date | None = None, so_senadores=False):
         hoje = date.today()
         completa = desde is not None
         if desde is None:
-            desde = hoje - timedelta(days=45)
+            desde = inicio_atualizacao_votacoes(hoje)
         _passo("votações", coletar_votacoes, desde, hoje)
         with engine.begin() as c:
             vincular_senadores(c)
@@ -566,6 +613,7 @@ def carga_inicial_se_vazio():
         return
     # banco de uma versão anterior: completa só o que falta
     coletar_senadores()
+    _passo("votações", coletar_votacoes, inicio_atualizacao_votacoes(), date.today())
     with engine.begin() as c:
         vincular_senadores(c)
     if not tem["despesas"]:

@@ -29,13 +29,11 @@ Votações, Orientações e Rankings**, com identidade visual no azul do Senado.
 Depois do primeiro acesso, troque sua senha em **Conta** e crie os usuários da equipe em **Usuários**
 (perfil “Leitura” ou “Admin”). `ADMIN_PASSWORD` só é usada para criar o admin na primeira vez.
 
-### Atualização diária
-Crie um segundo serviço no mesmo projeto, apontando para o mesmo repositório:
-- *Start command*: `python collector.py`
-- *Cron schedule*: `17 9 * * 1-6` (UTC = 6h17 em Brasília, seg–sáb)
-- variável `DATABASE_URL` igual à do app.
-
-Ele atualiza: votações dos últimos 45 dias, CEAPS do ano (e do ano anterior até março), proposições e perfis.
+### Atualização diária (automática)
+O próprio app atualiza os dados uma vez por dia, a partir das 6h de Brasília — não precisa de serviço de cron.
+Atualiza: votações desde a última registrada no banco (fecha sozinho qualquer buraco), CEAPS do ano
+(e do ano anterior até março), proposições e perfis. Se o Senado ficar instável e um mês de votações falhar,
+ele fica anotado e é refeito na coleta seguinte. Para desligar: `AUTO_COLETA=0`.
 Alternativa sem segundo serviço: `POST https://SEU-APP.up.railway.app/api/coletar?token=SEU_COLETA_TOKEN`
 (com `&desde=2023-02-01` faz a recarga completa).
 

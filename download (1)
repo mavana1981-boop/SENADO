@@ -1,4 +1,1 @@
-__pycache__/
-*.db
-.venv/
-.env
+3.12

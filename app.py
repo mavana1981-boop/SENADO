@@ -246,10 +246,47 @@ def _carga_inicial_em_segundo_plano():
                      args=(collector.carga_inicial_se_vazio,)).start()
 
 
-# Só roda no Railway (ou com AUTO_CARGA=1 local). Desligue com AUTO_CARGA=0.
+def precisa_atualizar(agora=None, ultima=None):
+    """Atualiza uma vez por dia, a partir das 6h de Brasília, se a última coleta tem mais de 20h."""
+    from datetime import datetime, timedelta, timezone
+    brt = timezone(timedelta(hours=-3))
+    agora = agora or datetime.now(brt)
+    if agora.hour < 6:
+        return False
+    if ultima is None:
+        ultima = metrics.opcoes_filtro().get("ultima_coleta")
+    if not ultima:
+        return True
+    try:
+        dt = datetime.fromisoformat(str(ultima))
+    except ValueError:
+        return True
+    if dt.tzinfo is None:          # gravada no relógio do servidor (UTC no Railway)
+        dt = dt.replace(tzinfo=timezone.utc)
+    return agora - dt > timedelta(hours=20)
+
+
+def _agendador_diario():
+    """Dispensa o serviço de cron: o próprio app atualiza os dados uma vez por dia."""
+    import time
+    import collector
+    time.sleep(120)  # deixa o boot e a carga inicial começarem primeiro
+    while True:
+        try:
+            if precisa_atualizar() and _coleta_lock.acquire(blocking=False):
+                logging.info("atualização diária iniciada")
+                _rodar_coleta(collector.executar)
+        except Exception:
+            logging.exception("agendador diário")
+        time.sleep(30 * 60)
+
+
+# Só roda no Railway (ou com AUTO_CARGA=1 local). Desligue com AUTO_CARGA=0 / AUTO_COLETA=0.
 if os.environ.get("AUTO_CARGA") != "0" and (os.environ.get("RAILWAY_ENVIRONMENT")
                                              or os.environ.get("AUTO_CARGA") == "1"):
     _carga_inicial_em_segundo_plano()
+    if os.environ.get("AUTO_COLETA") != "0":
+        threading.Thread(target=_agendador_diario, daemon=True).start()
 
 
 @app.get("/saude")

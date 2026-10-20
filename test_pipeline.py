@@ -271,6 +271,62 @@ def test_abas_novas_renderizam():
     assert cli.get("/inexistente").status_code == 404
 
 
+def test_coleta_recupera_meses_que_falharam():
+    """Reproduz o problema real: o Senado devolve 503 em maio/2026 e a coleta não pode parar ali."""
+    from datetime import date as d
+    import copy
+    base = json.loads((FIX / "orientacao_202312.json").read_text())["votacoes"][1]   # votação 9581
+
+    def votacao(vid, quando):
+        v = copy.deepcopy(base)
+        v["codigoVotacaoSve"], v["dataInicioVotacao"] = vid, quando
+        return v
+    dados = {"202604": [votacao(990401, "2026-04-28T16:57:09")],
+             "202605": [votacao(990501, "2026-05-20T16:52:11")],
+             "202607": [votacao(990701, "2026-07-15T18:00:00")],
+             "202610": [votacao(991001, "2026-10-14T17:00:00")]}
+    falhar = {"202605"}
+
+    def fake(caminho):
+        mes = caminho.split("orientacaoBancada/")[1][:6]
+        if mes in falhar:
+            raise RuntimeError("HTTP 503")
+        return {"votacoes": dados.get(mes, [])}
+    original = collector.get_json
+    collector.get_json = fake
+    try:
+        collector.coletar_votacoes(d(2026, 4, 1), d(2026, 10, 20))
+        with engine.connect() as c:
+            ids = {r[0] for r in c.execute(text("SELECT id FROM votacoes WHERE id >= 990000"))}
+        assert ids == {990401, 990701, 991001}              # maio falhou, mas os meses seguintes vieram
+        assert "2026-05-01" in collector._meses_pendentes()
+        # coleta diária seguinte (só últimos dias) também refaz o mês pendente
+        falhar.clear()
+        collector.coletar_votacoes(d(2026, 10, 1), d(2026, 10, 20))
+        with engine.connect() as c:
+            assert c.execute(text("SELECT COUNT(*) FROM votacoes WHERE id = 990501")).scalar() == 1
+        assert collector._meses_pendentes() == set()
+        # a janela diária começa antes da última votação do banco (fecha buracos antigos)
+        assert collector.inicio_atualizacao_votacoes(d(2026, 10, 20)) <= d(2026, 9, 14)
+    finally:
+        collector.get_json = original
+        with engine.begin() as c:
+            for t in ("votos", "orientacoes"):
+                c.execute(text(f"DELETE FROM {t} WHERE votacao_id >= 990000"))
+            c.execute(text("DELETE FROM votacoes WHERE id >= 990000"))
+
+
+def test_agendador_diario():
+    from datetime import datetime, timedelta, timezone
+    import app as painel
+    brt = timezone(timedelta(hours=-3))
+    manha = datetime(2026, 10, 21, 7, 0, tzinfo=brt)
+    assert painel.precisa_atualizar(manha, "2026-10-20T09:00:00")        # coleta de ontem
+    assert not painel.precisa_atualizar(manha, "2026-10-21T09:30:00")    # já rodou hoje (UTC)
+    assert not painel.precisa_atualizar(datetime(2026, 10, 21, 4, 0, tzinfo=brt), "2026-10-19T09:00:00")
+    assert painel.precisa_atualizar(manha, None) is not None
+
+
 if __name__ == "__main__":
     for nome, fn in list(globals().items()):
         if nome.startswith("test_"):
