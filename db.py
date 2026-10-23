@@ -3,7 +3,7 @@ import os
 import re
 import unicodedata
 
-from sqlalchemy import (BigInteger, Boolean, Column, DateTime, Float, Integer, MetaData,
+from sqlalchemy import (BigInteger, Boolean, Column, DateTime, Float, Integer, LargeBinary, MetaData,
                         String, Table, Text, create_engine)
 
 
@@ -146,6 +146,110 @@ usuarios = Table(
     Column("ativo", Boolean, default=True),
     Column("criado", DateTime),
     Column("ultimo_acesso", DateTime),
+)
+
+# ---------------- Meu Parlamentar ----------------
+
+usuario_senadores = Table(  # quem pode abrir o "Meu Parlamentar" de qual senador (admin vê todos)
+    "usuario_senadores", metadata,
+    Column("usuario_id", Integer, primary_key=True),
+    Column("codigo_senador", Integer, primary_key=True, index=True),
+)
+
+agenda = Table(  # agenda pública do Senado (codigo_senador nulo) e compromissos lançados pela equipe
+    "agenda", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("origem", String(10)),                # "senado" ou "equipe"
+    Column("chave", String(80), index=True),     # identificador da API (evita duplicar)
+    Column("codigo_senador", Integer, index=True),
+    Column("data", String(10), index=True),      # AAAA-MM-DD
+    Column("hora", String(5)),
+    Column("titulo", String(300)),
+    Column("colegiado", String(30)),             # sigla da comissão, "PLEN" para o Plenário
+    Column("local", String(200)),
+    Column("situacao", String(80)),
+    Column("descricao", Text),                   # pauta (texto) ou observação da equipe
+    Column("criado_por", String(60)),
+    Column("criado_em", DateTime),
+)
+
+solicitacoes = Table(
+    "solicitacoes", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("codigo_senador", Integer, index=True),
+    Column("titulo", String(200)),
+    Column("descricao", Text),
+    Column("solicitante", String(120)),          # quem pediu (o senador, chefe de gabinete...)
+    Column("status", String(20)),                # aberta, andamento, concluida, arquivada
+    Column("prazo", String(10)),
+    Column("criado_por", String(60)),
+    Column("criado_em", DateTime),
+    Column("atualizado_em", DateTime),
+)
+
+anexos = Table(
+    "anexos", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("solicitacao_id", Integer, index=True),
+    Column("nome", String(200)),
+    Column("mime", String(100)),
+    Column("tamanho", Integer),
+    Column("conteudo", LargeBinary),
+    Column("enviado_por", String(60)),
+    Column("enviado_em", DateTime),
+)
+
+questoes_ordem = Table(
+    "questoes_ordem", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("codigo_senador", Integer, index=True),
+    Column("autor", String(60)),
+    Column("situacao", Text),
+    Column("resposta", Text),
+    Column("modelo", String(60)),
+    Column("criado_em", DateTime),
+)
+
+documentos = Table(  # textos de referência (ex.: Regimento Interno), enviados pelo admin
+    "documentos", metadata,
+    Column("chave", String(40), primary_key=True),
+    Column("nome", String(200)),
+    Column("texto", Text),
+    Column("atualizado", DateTime),
+)
+
+temas_radar = Table(
+    "temas_radar", metadata,
+    Column("codigo_senador", Integer, primary_key=True),
+    Column("termo", String(120), primary_key=True),
+)
+
+noticias = Table(
+    "noticias", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("codigo_senador", Integer, index=True),
+    Column("termo", String(120)),
+    Column("titulo", String(500)),
+    Column("link", String(1000)),
+    Column("fonte", String(200)),
+    Column("publicado", DateTime, index=True),
+    Column("coletado_em", DateTime),
+)
+
+relatorias = Table(
+    "relatorias", metadata,
+    Column("codigo_senador", Integer, primary_key=True),
+    Column("chave", String(120), primary_key=True),   # matéria + colegiado + data de designação
+    Column("identificacao", String(60)),
+    Column("codigo_materia", BigInteger),
+    Column("ementa", Text),
+    Column("colegiado", String(30)),
+    Column("data_designacao", String(10)),
+    Column("data_destituicao", String(10)),
+    Column("situacao", String(200)),
+    Column("data_situacao", String(10)),
+    Column("url", String(300)),
+    Column("atualizado", DateTime),
 )
 
 meta = Table(

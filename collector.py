@@ -631,6 +631,8 @@ def executar(desde: date | None = None, so_senadores=False):
             limpar_senadores_sem_atividade(c)
         _passo("proposições", coletar_processos)
         _passo("perfis", coletar_perfis)
+        import coleta_meu
+        _passo("meu parlamentar", coleta_meu.executar)
     with engine.begin() as c:
         vincular_senadores(c)
         if not so_senadores:

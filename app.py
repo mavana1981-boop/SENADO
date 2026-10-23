@@ -23,7 +23,7 @@ app.jinja_loader = ChoiceLoader([FileSystemLoader(os.path.join(RAIZ, "templates"
 
 TEMPLATES = ("base.html", "_macros.html", "_selo.html", "login.html", "conta.html", "usuarios.html",
              "erro.html", "vazio.html", "perfil.html", "proposicoes.html", "cota.html", "votacoes.html",
-             "orientacoes.html", "rankings.html")
+             "orientacoes.html", "rankings.html", "meu.html", "meu_escolher.html")
 ESTATICOS = ("style.css", "plenario.svg", "favicon.svg")
 
 
@@ -51,7 +51,10 @@ def static(filename):
     return send_from_directory(base, nome, max_age=3600)
 
 init_db()
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024   # anexos (10 MB cada) e Regimento em PDF
 auth.configurar(app)
+import meu  # noqa: E402
+app.register_blueprint(meu.bp)
 
 ABAS = [("perfil", "Perfil"), ("proposicoes", "Proposições"), ("cota", "Cota"),
         ("votacoes", "Votações"), ("orientacoes", "Orientações"), ("rankings", "Rankings")]
