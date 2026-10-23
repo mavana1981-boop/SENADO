@@ -162,15 +162,15 @@ def indicadores_senador(codigo):
     return res
 
 
-@_memo
-def votos_oposicao(codigo, opostas=True):
+def votos_oposicao(codigo, f=None):
     """Votações em que o senador seguiu ou contrariou a orientação da Oposição.
 
     Mesma regra do % de oposicionismo: entram só votos SIM/NÃO do senador em votações
-    em que a Oposição orientou SIM ou NÃO. Com opostas=True, só as votações em que
-    Governo e Oposição orientaram em sentidos contrários (recorte do indicador do perfil).
+    em que a Oposição orientou SIM ou NÃO. Respeita os filtros da aba Orientações
+    (período, tipo de matéria e "só orientações opostas Governo × Oposição").
     """
-    where, p = metrics.Filtros(opostas=opostas).where_votacoes()
+    f = f or metrics.Filtros()
+    where, p = f.where_votacoes()
     p["c"] = codigo
     sql = text(f"""
         SELECT vt.id, vt.data, vt.sigla_materia, vt.numero_materia, vt.ano_materia,
@@ -187,7 +187,7 @@ def votos_oposicao(codigo, opostas=True):
         linhas = [dict(r) for r in c.execute(sql, p).mappings()]
     seguiu = [r for r in linhas if r["voto"] == r["opo"]]
     contra = [r for r in linhas if r["voto"] != r["opo"]]
-    return {"seguiu": seguiu, "contra": contra, "total": len(linhas), "opostas": opostas}
+    return {"seguiu": seguiu, "contra": contra, "total": len(linhas), "opostas": f.opostas}
 
 
 # ---------------- proposições ----------------

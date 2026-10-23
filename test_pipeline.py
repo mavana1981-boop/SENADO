@@ -254,27 +254,32 @@ def test_perfil():
     assert ind["opo"] == 100.0 and ind["participacao"] is not None
 
 
-def test_votos_oposicao_no_perfil():
+def test_votos_oposicao_em_orientacoes():
     import paineis
     # Flávio Bolsonaro seguiu a Oposição; a contagem bate com o % do indicador
-    vo = paineis.votos_oposicao(5894, True)
+    vo = paineis.votos_oposicao(5894, metrics.Filtros(opostas=True))
     ind = paineis.indicadores_senador(5894)
     assert len(vo["seguiu"]) == 1 and vo["contra"] == [] and vo["total"] == ind["opo_n"]
     v = vo["seguiu"][0]
-    assert v["voto"] == v["opo"] == "SIM" or v["voto"] == v["opo"] == "NÃO"
-    assert v["gov"] in ("SIM", "NÃO") and v["gov"] != v["opo"]
+    assert v["voto"] == v["opo"] and v["gov"] in ("SIM", "NÃO") and v["gov"] != v["opo"]
     # Romário votou contra a Oposição
     cod_rom = next(s["codigo"] for s in paineis.lista_senadores() if s["nome"] == "Romário")
-    vr = paineis.votos_oposicao(cod_rom, True)
+    vr = paineis.votos_oposicao(cod_rom, metrics.Filtros(opostas=True))
     assert vr["seguiu"] == [] and len(vr["contra"]) == 1
-    # recorte "todas" nunca tem menos votações que o de orientações opostas
-    assert paineis.votos_oposicao(5894, False)["total"] >= vo["total"]
+    # sem o filtro de orientações opostas nunca há menos votações
+    assert paineis.votos_oposicao(5894, metrics.Filtros(opostas=False))["total"] >= vo["total"]
+    # filtro de período que exclui a sessão zera o quadro
+    from datetime import date
+    assert paineis.votos_oposicao(5894, metrics.Filtros(inicio=date(2024, 1, 1)))["total"] == 0
     cli = _cliente()
-    html = cli.get("/perfil?senador=5894").get_data(as_text=True)
+    html = cli.get("/orientacoes?senador=5894").get_data(as_text=True)
     assert "Favoráveis à Oposição" in html and "Contrários à Oposição" in html
-    assert "PL 3626/2023" in html
-    html = cli.get(f"/perfil?senador={cod_rom}&recorte=todas").get_data(as_text=True)
-    assert "Contrários à Oposição" in html and "PL 3626/2023" in html
+    assert "PL 3626/2023" in html and 'id="votos-senador"' in html
+    assert "senador=5894" in html                       # nomes das listas viram links
+    html = cli.get(f"/orientacoes?senador={cod_rom}&opostas=0").get_data(as_text=True)
+    assert "Contrários à Oposição" in html and 'name="opostas" value="0"' in html
+    # o quadro saiu do perfil
+    assert "Favoráveis à Oposição" not in cli.get("/perfil?senador=5894").get_data(as_text=True)
 
 
 def test_abas_novas_renderizam():

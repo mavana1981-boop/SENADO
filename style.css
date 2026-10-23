@@ -243,9 +243,19 @@ td.c,th.c{text-align:center}
 
 /* perfil: votos × orientação da Oposição */
 .vopo-quadro{margin-bottom:14px}
-.vopo-recorte{display:flex;gap:6px;flex-wrap:wrap;padding:12px 14px 0}
-.vopo-recorte a{padding:5px 11px;border:1px solid var(--linha);border-radius:16px;text-decoration:none;font-size:12px;background:#fff;color:var(--suave)}
-.vopo-recorte a.sel{background:var(--opo);border-color:var(--opo);color:#fff}
+.vopo-sel{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px 0}
+.vopo-sel .foto{width:40px;height:40px;border-radius:50%;background:#dfe6f0 center/cover;flex:none}
+.vopo-sel .id{flex:1 1 180px;min-width:0}
+.vopo-sel .id b{display:block;font-size:15px}
+.vopo-sel .id span{font-size:12px;color:var(--suave)}
+.vopo-sel label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--suave);
+  text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.vopo-sel select{font:inherit;font-size:13px;text-transform:none;letter-spacing:0;padding:6px 8px;
+  border:1px solid var(--linha);border-radius:6px;background:#fff;color:var(--tinta);min-width:260px;max-width:100%}
+a.sen-link{text-decoration:none;display:block;border-radius:6px}
+a.sen-link:hover .nm{color:var(--pri);text-decoration:underline}
+a.sen-link.sel .nm{color:var(--pri)}
+@media (max-width:640px){ .vopo-sel label{flex:1 1 100%} .vopo-sel select{min-width:0;width:100%} }
 .vopo-grade{padding:12px 14px;margin:0}
 .vopo td{vertical-align:top}
 .vopo a{text-decoration:none;color:var(--pri)}

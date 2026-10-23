@@ -2,6 +2,31 @@
 {% import "_macros.html" as m %}
 {% block titulo %}Orientações{% endblock %}
 {% block conteudo %}
+{% macro lista_vopo(itens, vazio) -%}
+<div class="rolagem" style="max-height:440px">
+<table class="vopo">
+  <thead><tr><th class="m-esc">Data</th><th>Matéria</th><th class="c">Voto</th><th class="c">Oposição</th><th class="c m-esc">Governo</th></tr></thead>
+  <tbody>
+  {% for v in itens %}
+    <tr>
+      <td class="m-esc" style="white-space:nowrap;color:var(--suave)">{{ v.data|data }}</td>
+      <td><a href="{{ url_for('votacoes', id=v.id) }}"><b>{{ v.sigla_materia }} {{ v.numero_materia }}/{{ v.ano_materia }}</b></a>{% if v.dispositivo %} <span style="color:var(--suave);font-size:12px">· {{ v.dispositivo }}</span>{% endif %}
+        <div class="vopo-desc" title="{{ v.descricao_materia or '' }}">{{ v.descricao_materia or v.descricao_votacao or '' }}</div>
+        <div class="vopo-data">{{ v.data|data }}</div></td>
+      <td class="c"><span class="pill {{ v.voto }}">{{ v.voto }}</span></td>
+      <td class="c"><span class="pill {{ v.opo }}">{{ v.opo }}</span></td>
+      <td class="c m-esc"><span class="pill {{ v.gov or 'vazio' }}">{{ v.gov or '—' }}</span></td>
+    </tr>
+  {% else %}<tr><td colspan="5" class="vazio-msg">{{ vazio }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+
+{% macro link_sen(x) -%}
+{% set q = request.args.to_dict() %}{% set _ = q.update({'senador': x.codigo}) %}
+<a class="sen-link {{ 'sel' if x.codigo == cod }}" href="{{ url_for('orientacoes', **q) }}#votos-senador" title="Ver votos × orientação da Oposição">{{ m.senador(x) }}</a>
+{%- endmacro %}
 {{ m.filtros(f, op) }}
 
 <section class="kpis">
@@ -21,7 +46,7 @@
       <thead><tr><th>Senador(a)</th><th class="n m-esc">Seguiu</th><th class="n m-esc">Contra</th><th>% Governismo</th></tr></thead>
       <tbody>
       {% for s in governismo %}
-        <tr><td>{{ m.senador(s) }}</td><td class="n m-esc">{{ s.seguiu }}</td><td class="n m-esc">{{ s.contra }}</td>
+        <tr><td>{% if s.codigo %}{{ link_sen(s) }}{% else %}{{ m.senador(s) }}{% endif %}</td><td class="n m-esc">{{ s.seguiu }}</td><td class="n m-esc">{{ s.contra }}</td>
             <td>{{ m.barra(s.pct, 'gov') }}</td></tr>
       {% endfor %}
       </tbody>
@@ -38,7 +63,7 @@
       <thead><tr><th>Senador(a)</th><th class="n m-esc">Seguiu</th><th class="n m-esc">Contra</th><th>% Oposicionismo</th></tr></thead>
       <tbody>
       {% for s in oposicionismo %}
-        <tr><td>{{ m.senador(s) }}</td><td class="n m-esc">{{ s.seguiu }}</td><td class="n m-esc">{{ s.contra }}</td>
+        <tr><td>{% if s.codigo %}{{ link_sen(s) }}{% else %}{{ m.senador(s) }}{% endif %}</td><td class="n m-esc">{{ s.seguiu }}</td><td class="n m-esc">{{ s.contra }}</td>
             <td>{{ m.barra(s.pct, 'opo') }}</td></tr>
       {% endfor %}
       </tbody>
@@ -47,6 +72,40 @@
     </div>
   </div>
 </section>
+
+{% if vopo %}
+<section class="card neu vopo-quadro" id="votos-senador">
+  <h2>Votos × orientação da Oposição
+    <small>{{ vopo.total }} {{ 'votação' if vopo.total == 1 else 'votações' }} · {{ ((100 * vopo.seguiu|length / vopo.total)|round(1))|pct if vopo.total else '—' }} a favor</small></h2>
+  <form class="vopo-sel" method="get" action="{{ url_for('orientacoes') }}#votos-senador">
+    {% for k, v in request.args.items() if k != 'senador' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <span class="foto"{% if s and s.foto %} style="background-image:url('{{ s.foto }}')"{% endif %}></span>
+    <div class="id"><b>{{ s.nome }}</b><span>{{ s.partido or 'Sem partido' }}{% if s.uf %} · {{ s.uf }}{% endif %}</span></div>
+    <label>Senador(a)
+      <select name="senador" onchange="this.form.submit()">
+        <optgroup label="Em exercício">
+        {% for x in lista if x.em_exercicio %}<option value="{{ x.codigo }}" {{ 'selected' if x.codigo == cod }}>{{ x.nome }} ({{ x.partido or 's/p' }}-{{ x.uf }})</option>{% endfor %}
+        </optgroup>
+        <optgroup label="Fora de exercício (57ª legislatura)">
+        {% for x in lista if not x.em_exercicio %}<option value="{{ x.codigo }}" {{ 'selected' if x.codigo == cod }}>{{ x.nome }} ({{ x.partido or 's/p' }}-{{ x.uf }})</option>{% endfor %}
+        </optgroup>
+      </select>
+    </label>
+    <noscript><button class="btn">Ver</button></noscript>
+  </form>
+  <div class="grade vopo-grade">
+    <div class="card opo">
+      <h2>Favoráveis à Oposição <small>{{ vopo.seguiu|length }}</small></h2>
+      {{ lista_vopo(vopo.seguiu, 'Nenhum voto acompanhando a Oposição neste recorte.') }}
+    </div>
+    <div class="card gov">
+      <h2>Contrários à Oposição <small>{{ vopo.contra|length }}</small></h2>
+      {{ lista_vopo(vopo.contra, 'Nenhum voto contra a Oposição neste recorte.') }}
+    </div>
+  </div>
+  <p class="nota">Segue os filtros do topo (período, matéria e {{ '“só orientações opostas”, ligado' if vopo.opostas else '“só orientações opostas”, desligado' }}). Clique num nome nas listas de Governismo ou Oposicionismo para ver os votos dele. Conta só votos Sim/Não em votações em que a Oposição orientou Sim ou Não.</p>
+</section>
+{% endif %}
 
 <section class="grade">
   <div class="card neu">
