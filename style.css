@@ -266,3 +266,32 @@ a.sen-link.sel .nm{color:var(--pri)}
 @media (max-width:640px){ .vopo-data{display:block} }
 .vopo-grade .card.opo h2{background:var(--opo-cl);color:var(--opo)}
 .vopo-grade .card.gov h2{background:var(--gov-cl);color:var(--gov)}
+
+/* proposições: dias parado */
+th.ordenavel a{text-decoration:none;color:inherit}
+th.ordenavel a:hover{color:var(--pri)}
+th.ordenavel.ativa a{color:var(--pri)}
+th.ordenavel .seta{font-size:10px;opacity:.8}
+td.dias b{font-variant-numeric:tabular-nums;font-weight:600}
+td.dias b.d1{color:#8a6d22}
+td.dias b.d2{color:#c0612b}
+td.dias b.d3{color:#b03021}
+
+/* perfil: notificações */
+.notif-quadro{margin-bottom:14px}
+.notif-badge{background:var(--ouro);color:#fff;border-radius:10px;padding:1px 8px;font-weight:600;font-size:11px}
+.notif{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-bottom:1px solid #edf1f6}
+.notif.recente{background:#fffaf0}
+.notif-tipo{flex:none;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-radius:4px;padding:2px 6px;margin-top:2px}
+.notif-tipo.situacao{background:var(--opo-cl);color:var(--opo)}
+.notif-tipo.nova{background:#e6f4ea;color:#1d6b34}
+.notif-txt{flex:1;min-width:0;font-size:13px}
+.notif-txt a{color:var(--pri);text-decoration:none}
+.notif-txt a:hover{text-decoration:underline}
+.notif-de{color:var(--suave);text-decoration:line-through;text-decoration-color:rgba(91,103,121,.4)}
+.notif-seta{color:var(--suave)}
+.notif-para{font-weight:600}
+.notif-ementa{font-size:12px;color:var(--suave);margin-top:2px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.notif-quando{flex:none;text-align:right;font-size:12px;color:var(--suave);white-space:nowrap}
+.notif-quando small{display:block;font-size:11px}
+@media (max-width:640px){ .notif{flex-wrap:wrap} .notif-quando{width:100%;text-align:left;padding-left:52px} .notif-quando small{display:inline;margin-left:6px} }

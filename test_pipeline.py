@@ -360,3 +360,62 @@ if __name__ == "__main__":
         if nome.startswith("test_"):
             fn()
             print("ok", nome)
+
+
+def test_dias_parado_e_ordenacao():
+    import paineis
+    from datetime import date
+    hoje = date(2026, 1, 1)
+    assert paineis.dias_parado({"tramitando": True, "data_situacao": "2025-10-21"}, hoje) == 72
+    assert paineis.dias_parado({"tramitando": True, "data_situacao": None,
+                                "data_apresentacao": "2025-12-01"}, hoje) == 31
+    assert paineis.dias_parado({"tramitando": False, "data_situacao": "2024-06-10"}, hoje) is None
+    mais = [p["identificacao"] for p in paineis.proposicoes(5894, ordem="parado")["itens"]]
+    menos = [p["identificacao"] for p in paineis.proposicoes(5894, ordem="parado_asc")["itens"]]
+    # em tramitação primeiro: PEC 1/2025 (situação de 27/08/2025) está parada há mais tempo que o PDL
+    assert mais[:2] == ["PEC 1/2025", "PDL 29/2025"] and menos[:2] == ["PDL 29/2025", "PEC 1/2025"]
+    itens = paineis.proposicoes(5894, ordem="parado")["itens"]
+    assert itens[0]["dias_parado"] >= itens[1]["dias_parado"] and itens[-1]["dias_parado"] is None
+    cli = _cliente()
+    html = cli.get("/proposicoes?senador=5894&ordem=parado").get_data(as_text=True)
+    assert "Dias parado" in html and "▼" in html and "ordem=parado_asc" in html
+    assert cli.get("/proposicoes?senador=5894&ordem=xyz").status_code == 200
+
+
+def test_monitor_de_situacao_gera_notificacoes():
+    import copy
+    import paineis
+    cli = _cliente()
+    assert "Nenhuma mudança registrada ainda" in cli.get("/perfil?senador=5894").get_data(as_text=True)
+    itens = json.loads((FIX / "processos_5894.json").read_text())
+    # carga inicial (notificar=False) não gera aviso, mesmo com tudo "novo"
+    with engine.begin() as c:
+        collector.gravar_processos(c, 5894, "flavio bolsonaro", itens, notificar=False)
+    assert paineis.notificacoes(5894)["itens"] == []
+    # coleta do dia seguinte: PDL 29/2025 mudou de situação e apareceu um PL novo
+    novos = copy.deepcopy(itens)
+    novos[0]["situacaoAtual"] = "PRONTA PARA A PAUTA NA COMISSÃO"
+    novos[0]["dataSituacaoAtual"] = "2026-10-22"
+    novo = copy.deepcopy(itens[0])
+    novo.update(id=8789999, identificacao="PL 9999/2026", situacaoAtual="AGUARDANDO LEITURA",
+                dataApresentacao="2026-10-22", dataSituacaoAtual="2026-10-22")
+    novos.append(novo)
+    with engine.begin() as c:
+        collector.gravar_processos(c, 5894, "flavio bolsonaro", novos, notificar=True)
+        # a mesma coleta, repetida, não duplica avisos
+        collector.gravar_processos(c, 5894, "flavio bolsonaro", novos, notificar=True)
+    n = paineis.notificacoes(5894)
+    tipos = {(x["tipo"], x["identificacao"]) for x in n["itens"]}
+    assert tipos == {("situacao", "PDL 29/2025"), ("nova", "PL 9999/2026")}
+    mud = next(x for x in n["itens"] if x["tipo"] == "situacao")
+    assert mud["situacao_anterior"] == "AGUARDANDO DESIGNAÇÃO DO RELATOR"
+    assert mud["situacao_nova"] == "PRONTA PARA A PAUTA NA COMISSÃO" and n["recentes"] == 2
+    html = cli.get("/perfil?senador=5894").get_data(as_text=True)
+    assert "PRONTA PARA A PAUTA NA COMISSÃO" in html and "PL 9999/2026" in html and "2 nos últimos 7 dias" in html
+    # outro senador não recebe os avisos do Flávio
+    assert paineis.notificacoes(5672)["itens"] == []
+    # limpeza de antigas
+    from datetime import date, timedelta
+    with engine.begin() as c:
+        collector.limpar_notificacoes(c, hoje=date.today() + timedelta(days=collector.DIAS_NOTIFICACOES + 1))
+    assert paineis.notificacoes(5894)["itens"] == []

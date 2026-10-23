@@ -14,6 +14,30 @@
   <div class="kpi dest ouro"><b>{{ cota.total.pct_uso|pct if cota else '—' }}</b><span>Uso da cota (2023–hoje)</span><small>{{ cota.total.gasto|brl(0) if cota else '' }} gastos</small></div>
 </section>
 
+<section class="card neu notif-quadro">
+  <h2>Notificações <small>{% if notif.recentes %}<span class="notif-badge">{{ notif.recentes }} nos últimos 7 dias</span>{% else %}mudanças nas proposições{% endif %}</small></h2>
+  <div class="rolagem" style="max-height:330px">
+  {% for n in notif.itens %}
+    <div class="notif {{ 'recente' if n.recente }}">
+      <span class="notif-tipo {{ n.tipo }}">{{ 'Nova' if n.tipo == 'nova' else 'Mudou' }}</span>
+      <div class="notif-txt">
+        <b>{% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.identificacao }}</a>{% else %}{{ n.identificacao }}{% endif %}</b>
+        {% if n.tipo == 'nova' %}
+          <span>proposição nova{% if n.situacao_nova %} · {{ n.situacao_nova }}{% endif %}</span>
+        {% else %}
+          <span class="notif-de">{{ n.situacao_anterior or '—' }}</span> <span class="notif-seta">→</span> <span class="notif-para">{{ n.situacao_nova }}</span>
+        {% endif %}
+        {% if n.ementa %}<div class="notif-ementa">{{ n.ementa }}</div>{% endif %}
+      </div>
+      <div class="notif-quando">{{ n.detectado_em|data }}{% if n.data_situacao and n.tipo != 'nova' %}<small>situação de {{ n.data_situacao|data }}</small>{% endif %}</div>
+    </div>
+  {% else %}
+    <div class="vazio-msg">Nenhuma mudança registrada ainda. O monitor confere as proposições do senador uma vez por dia e avisa aqui quando a situação de alguma muda ou quando surge uma nova.</div>
+  {% endfor %}
+  </div>
+  <p class="nota">Verificação diária, junto com a atualização automática dos dados (a partir das 6h). Ficam guardados os últimos 180 dias.</p>
+</section>
+
 <section class="grade">
   <div class="card neu">
     <h2>Dados pessoais</h2>
