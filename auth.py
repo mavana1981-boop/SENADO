@@ -243,9 +243,21 @@ def gerenciar():
                               .values(senha_hash=generate_password_hash(senha)))
                     flash("Senha redefinida.", "ok")
             elif acao == "excluir" and uid:
+                from db import usuario_senadores
+                c.execute(delete(usuario_senadores).where(usuario_senadores.c.usuario_id == uid))
                 c.execute(delete(usuarios).where(usuarios.c.id == uid))
                 flash("Usuário excluído.", "ok")
+            elif acao == "vincular" and uid:
+                pass  # gravado logo abaixo, fora desta transação
+        if acao == "vincular" and uid:
+            import meu
+            cods = [int(x) for x in request.form.getlist("senadores") if x.isdigit()]
+            meu.salvar_vinculos(uid, cods)
+            flash(f"Vínculos do Meu Parlamentar atualizados ({len(cods)} senador(es)).", "ok")
         return redirect(url_for("auth.gerenciar"))
+    import meu
+    import paineis
     with engine.connect() as c:
         lista = [dict(r) for r in c.execute(select(usuarios).order_by(usuarios.c.login)).mappings()]
-    return render_template("usuarios.html", aba=None, lista=lista)
+    return render_template("usuarios.html", aba=None, lista=lista, vinculos=meu.todos_vinculos(),
+                           senadores=paineis.lista_senadores())

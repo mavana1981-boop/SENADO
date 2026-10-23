@@ -419,3 +419,238 @@ def test_monitor_de_situacao_gera_notificacoes():
     with engine.begin() as c:
         collector.limpar_notificacoes(c, hoje=date.today() + timedelta(days=collector.DIAS_NOTIFICACOES + 1))
     assert paineis.notificacoes(5894)["itens"] == []
+
+
+# ======================= Meu Parlamentar =======================
+
+def _cliente_usuario(login, senha):
+    import re
+    import app as painel
+    cli = painel.app.test_client()
+    tok = re.search(r'name="_csrf" value="([^"]+)"', cli.get("/login").get_data(as_text=True)).group(1)
+    r = cli.post("/login", data={"_csrf": tok, "login": login, "senha": senha})
+    assert r.status_code == 302, "login falhou"
+    return cli
+
+
+def _tok(cli, url):
+    import re
+    return re.search(r'name="_csrf" value="([^"]+)"', cli.get(url).get_data(as_text=True)).group(1)
+
+
+def test_meu_parlamentar_acesso_por_vinculo():
+    adm = _cliente()
+    tok = _tok(adm, "/usuarios")
+    adm.post("/usuarios", data={"_csrf": tok, "acao": "criar", "login": "assessora",
+                                "nome": "Assessora", "senha": "senha-segura-1"})
+    from db import usuarios
+    from sqlalchemy import select
+    with engine.connect() as c:
+        uid = c.execute(select(usuarios.c.id).where(usuarios.c.login == "assessora")).scalar()
+    u = _cliente_usuario("assessora", "senha-segura-1")
+    assert "Meu parlamentar" not in u.get("/orientacoes").get_data(as_text=True)
+    assert u.get("/meu/").status_code == 403 and u.get("/meu/5894").status_code == 403
+    # admin vincula a assessora ao Flávio
+    r = adm.post("/usuarios", data={"_csrf": tok, "acao": "vincular", "id": uid, "senadores": ["5894"]})
+    assert r.status_code == 302
+    assert "1 senador(es)" in adm.get("/usuarios").get_data(as_text=True)
+    assert "Meu parlamentar" in u.get("/orientacoes").get_data(as_text=True)
+    r = u.get("/meu/")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/meu/5894")
+    assert u.get("/meu/5894").status_code == 200
+    assert u.get("/meu/5672").status_code == 403          # não vinculado
+    assert adm.get("/meu/5672").status_code == 200         # admin vê todos
+
+
+def test_agenda_parse_e_filtro_por_comissao():
+    import coleta_meu
+    import meu
+    from datetime import date, timedelta
+    hoje = date.today()
+    d1, d2 = (hoje + timedelta(days=1)).isoformat(), (hoje + timedelta(days=2)).isoformat()
+    # formato novo (comissões) e antigo (Plenário), como devolvidos pela API
+    doc_com = {"reunioes": [
+        {"codigo": 111, "dataInicio": f"{d1}T09:00:00", "titulo": "3ª Reunião, Extraordinária",
+         "colegiadoCriador": {"sigla": "GPARGENTINA", "nome": "Grupo Parlamentar Brasil-Argentina"},
+         "local": "Ala Senador Alexandre Costa, Plenário nº 7", "situacao": "Agendada",
+         "partes": [{"itens": [{"materia": {"identificacao": "PL 1/2025", "ementa": "Dispõe sobre X."},
+                                "relator": "Senador Alan Rick", "dataPrevista": d1}]}]},
+        {"codigo": 222, "dataInicio": f"{d1}T14:00:00", "titulo": "Reunião da CAE",
+         "colegiadoCriador": {"sigla": "CAE"}}]}
+    doc_plen = {"AgendaPlenario": {"Sessoes": {"Sessao": {
+        "CodigoSessao": "9001", "DataSessao": d2, "HoraInicioSessao": "14:00",
+        "TipoSessao": {"DescricaoTipoSessao": "Deliberativa Ordinária"},
+        "Materias": {"Materia": [{"IdentificacaoMateria": {"DescricaoIdentificacaoMateria": "PEC 1/2025"},
+                                  "EmentaMateria": "Altera a Constituição."}]}}}}}
+    ev = coleta_meu.parse_agenda(doc_com) + coleta_meu.parse_agenda(doc_plen, plenario=True)
+    assert len(ev) == 3
+    gp = next(e for e in ev if e["colegiado"] == "GPARGENTINA")
+    assert gp["hora"] == "09:00" and gp["data"] == d1 and "PL 1/2025" in gp["descricao"]
+    plen = next(e for e in ev if e["colegiado"] == "PLEN")
+    assert plen["hora"] == "14:00" and "Deliberativa" in plen["titulo"] and "PEC 1/2025" in plen["descricao"]
+    with engine.begin() as c:
+        coleta_meu.gravar_agenda_senado(c, ev, hoje - timedelta(days=7), hoje + timedelta(days=45))
+        coleta_meu.gravar_agenda_senado(c, ev, hoje - timedelta(days=7), hoje + timedelta(days=45))  # sem duplicar
+    # Alan Rick (5672) é do GPARGENTINA, não da CAE; Plenário vale para todos; o nome dele está na pauta
+    ag = meu.agenda_senador(5672, hoje, hoje + timedelta(days=10))
+    itens = [e for d in ag for e in d["itens"]]
+    assert {e["colegiado"] for e in itens} == {"GPARGENTINA", "PLEN"}
+    assert next(e for e in itens if e["colegiado"] == "GPARGENTINA")["citado"]
+    todos = [e for d in meu.agenda_senador(5672, hoje, hoje + timedelta(days=10), so_dele=False) for e in d["itens"]]
+    assert len(todos) == 3
+    # compromisso da equipe pela tela
+    adm = _cliente()
+    tok = _tok(adm, "/meu/5672?secao=agenda")
+    adm.post("/meu/5672?secao=agenda", data={"_csrf": tok, "acao": "novo", "data": d1, "hora": "18:30",
+                                            "titulo": "Jantar com prefeitos do Acre", "local": "Gabinete"})
+    html = adm.get("/meu/5672?secao=agenda").get_data(as_text=True)
+    assert "Jantar com prefeitos do Acre" in html and "senador na pauta" in html and "CAE" not in html
+    assert "Jantar com prefeitos do Acre" not in adm.get("/meu/5894?secao=agenda").get_data(as_text=True)
+
+
+def test_solicitacoes_com_anexos():
+    import io
+    adm = _cliente()
+    tok = _tok(adm, "/meu/5894?secao=solicitacoes")
+    r = adm.post("/meu/5894?secao=solicitacoes", content_type="multipart/form-data", data={
+        "_csrf": tok, "acao": "nova", "titulo": "Nota técnica sobre a PEC 1/2025",
+        "descricao": "Pedido do senador na reunião de segunda.", "solicitante": "o senador", "prazo": "2020-01-01",
+        "arquivos": [(io.BytesIO(b"%PDF-1.4 conteudo"), "minuta.pdf"), (io.BytesIO(b"a;b\n1;2"), "dados.csv")]})
+    assert r.status_code == 302
+    html = adm.get("/meu/5894?secao=solicitacoes").get_data(as_text=True)
+    assert "Nota técnica sobre a PEC 1/2025" in html and "minuta.pdf" in html and "atrasada" in html
+    import re
+    aid = int(re.search(r"/meu/5894/anexo/(\d+)", html).group(1))
+    sid = int(re.search(r'name="id" value="(\d+)"', html.split("Nota técnica")[1]).group(1))
+    baixado = adm.get(f"/meu/5894/anexo/{aid}")
+    assert baixado.status_code == 200 and baixado.data.startswith(b"%PDF") and "attachment" in baixado.headers["Content-Disposition"]
+    assert adm.get(f"/meu/5672/anexo/{aid}").status_code == 404        # anexo de outro senador
+    adm.post("/meu/5894?secao=solicitacoes", data={"_csrf": tok, "acao": "status", "id": sid, "status": "concluida"})
+    assert "concluida (1)" in adm.get("/meu/5894?secao=solicitacoes").get_data(as_text=True).lower() or \
+        "Concluída (1)" in adm.get("/meu/5894?secao=solicitacoes").get_data(as_text=True)
+    r = adm.post("/meu/5894?secao=solicitacoes", content_type="multipart/form-data", data={
+        "_csrf": tok, "acao": "nova", "titulo": "Arquivo perigoso", "arquivos": [(io.BytesIO(b"MZ"), "virus.exe")]})
+    assert "Tipo de arquivo não aceito" in adm.get("/meu/5894?secao=solicitacoes").get_data(as_text=True)
+    assert "Arquivo perigoso" not in adm.get("/meu/5894?secao=solicitacoes").get_data(as_text=True)
+
+
+def _regimento_falso():
+    linhas = []
+    for n in range(1, 451):
+        if n == 403:
+            corpo = "Toda dúvida sobre interpretação deste Regimento, na sua prática, constitui questão de ordem."
+        elif n == 412:
+            corpo = "A legitimidade na elaboração de norma legal é assegurada pela observância das normas regimentais."
+        elif n == 235:
+            corpo = "A prorrogação do prazo de emendas perante a comissão depende de requerimento aprovado."
+        else:
+            corpo = f"Disposição genérica número {n} sobre funcionamento das sessões."
+        linhas.append(f"Art. {n}{'º' if n < 10 else '.'} {corpo}")
+    return "\n".join(linhas)
+
+
+def test_questao_de_ordem_por_ia(monkeypatch):
+    import io
+    import questoes
+    texto = _regimento_falso()
+    arts = questoes.artigos(texto)
+    assert len(arts) == 450 and arts[402][0] == 403
+    sel = [n for n, _ in questoes.selecionar_trechos(texto, "prazo de emendas na comissão foi encerrado sem requerimento")]
+    assert set(range(403, 409)) <= set(sel) and 235 in sel and len(sel) < 60
+    adm = _cliente()
+    tok = _tok(adm, "/meu/5894?secao=questoes")
+    html = adm.get("/meu/5894?secao=questoes").get_data(as_text=True)
+    assert "ANTHROPIC_API_KEY" in html                     # sem chave: avisa e não gera
+    r = adm.post("/meu/5894?secao=questoes", content_type="multipart/form-data", data={
+        "_csrf": tok, "acao": "regimento", "arquivo": (io.BytesIO(texto.encode()), "RISF.txt")})
+    assert "450 artigos" in adm.get("/meu/5894?secao=questoes").get_data(as_text=True)
+
+    enviado = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": "## Cabimento\nCabe, no Plenário.\n## Questão de ordem (texto para leitura)\n"
+                                 "Senhor Presidente, com fundamento no art. 403 do Regimento Interno, formulo a seguinte questão de ordem: **<script>x</script>**\n"
+                                 "## Pedido\n- Que seja reaberto o prazo de emendas."}]}
+
+    class _Sessao:
+        def post(self, url, json=None, timeout=None, headers=None):
+            enviado.update(url=url, corpo=json, headers=headers)
+            return _Resp()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-teste")
+    monkeypatch.setattr(questoes, "processar_em_segundo_plano",
+                        lambda qid, nome=None: questoes.processar(qid, nome, sessao=_Sessao()))
+    adm.post("/meu/5894?secao=questoes", data={"_csrf": tok, "acao": "gerar",
+             "situacao": "A comissão encerrou o prazo de emendas sem requerimento aprovado e já vai votar o parecer hoje."})
+    assert enviado["url"] == questoes.API_URL and enviado["headers"]["x-api-key"] == "sk-teste"
+    assert enviado["corpo"]["model"] == questoes.modelo()
+    msg = enviado["corpo"]["messages"][0]["content"]
+    assert "<regimento>" in msg and "Art. 403" in msg and "Art. 235" in msg and "Flávio Bolsonaro" in msg
+    html = adm.get("/meu/5894?secao=questoes").get_data(as_text=True)
+    assert "<h3>Cabimento</h3>" in html and "Que seja reaberto o prazo de emendas" in html
+    assert "<script>x</script>" not in html and "&lt;script&gt;" in html   # HTML da IA é escapado
+    assert "Artigos do Regimento enviados à IA" in html
+    # erro da API aparece para o usuário
+    class _Erro(_Resp):
+        status_code = 401
+        text = "invalid x-api-key"
+        def json(self):
+            return {"error": {"message": "invalid x-api-key"}}
+    qid = questoes.criar_pedido(5894, "admin", "Outra situação qualquer com detalhes suficientes para o teste.")
+    questoes.processar(qid, sessao=type("S", (), {"post": lambda self, *a, **k: _Erro()})())
+    assert questoes.historico(5894)[0]["resposta"].startswith("[ERRO] A API da Anthropic respondeu 401")
+
+
+def test_radar_relatorias_clipping_e_rankings():
+    import coleta_meu
+    import meu
+    from datetime import date
+    rss = """<?xml version="1.0"?><rss><channel>
+      <item><title>Senador apresenta PEC sobre fundo - Agência Senado</title><link>https://exemplo/a</link>
+        <pubDate>Thu, 22 Oct 2026 10:00:00 GMT</pubDate><source url="https://www12.senado.leg.br">Agência Senado</source></item>
+      <item><title>Outra notícia</title><link>https://exemplo/b</link><pubDate>xx</pubDate></item>
+    </channel></rss>"""
+    itens = coleta_meu.parse_rss(rss)
+    assert itens[0]["titulo"] == "Senador apresenta PEC sobre fundo" and itens[0]["fonte"] == "Agência Senado"
+    assert itens[1]["publicado"] is None
+    with engine.begin() as c:
+        assert coleta_meu.gravar_noticias(c, 5894, "Flávio Bolsonaro", itens) == 2
+        assert coleta_meu.gravar_noticias(c, 5894, "Flávio Bolsonaro", itens) == 0      # sem duplicar
+    adm = _cliente()
+    tok = _tok(adm, "/meu/5894?secao=radar")
+    adm.post("/meu/5894?secao=radar", data={"_csrf": tok, "acao": "add", "termo": "segurança pública"})
+    assert ("segurança pública", "segurança pública") in coleta_meu.consultas_radar(5894)
+    assert coleta_meu.consultas_radar(5894)[0] == ("Flávio Bolsonaro", '"Flávio Bolsonaro" senador')
+    assert "news.google.com/rss/search" in coleta_meu.url_noticias("x")
+    html = adm.get("/meu/5894?secao=radar").get_data(as_text=True)
+    assert "Senador apresenta PEC sobre fundo" in html and "segurança pública" in html
+
+    doc_rel = {"relatorias": [
+        {"materia": {"identificacao": "PL 500/2025", "codigoMateria": 170001, "ementa": "Trata de Y."},
+         "siglaColegiado": "CCJ", "dataDesignacao": "2025-03-01", "situacaoAtual": "APROVADA PELA COMISSÃO",
+         "dataSituacaoAtual": date.today().isoformat()},
+        {"IdentificacaoMateria": {"SiglaSubtipoMateria": "PLS", "NumeroMateria": "0012", "AnoMateria": "2019"},
+         "IdentificacaoComissao": {"SiglaComissao": "CAE"}, "DataDesignacao": "2019-05-01"}]}
+    rels = coleta_meu.parse_relatorias(doc_rel)
+    assert [r["identificacao"] for r in rels] == ["PL 500/2025", "PLS 12/2019"]
+    assert rels[0]["colegiado"] == "CCJ" and rels[1]["colegiado"] == "CAE"
+    with engine.begin() as c:
+        coleta_meu.gravar_relatorias(c, 5894, rels)
+        coleta_meu.gravar_relatorias(c, 5894, rels)
+    clip = meu.clipping(5894, date(2023, 1, 1), date.today())
+    tipos = {(e["tipo"], e["identificacao"]) for d in clip["dias"] for e in d["itens"]}
+    assert ("relatoria", "PL 500/2025") in tipos and ("autoria", "PL 2100/2023") in tipos   # virou norma
+    assert ("autoria", "PEC 1/2025") not in tipos                                         # só tramitando
+    assert meu.eh_aprovacao("APROVADA") and meu.eh_aprovacao("Remetida à Câmara dos Deputados")
+    assert not meu.eh_aprovacao("REJEITADA") and not meu.eh_aprovacao("AGUARDANDO DESIGNAÇÃO DO RELATOR")
+
+    rk = {r["slug"]: r for r in meu.rankings(5894)}
+    assert rk["projetos"]["posicao"]["pos"] >= 1 and rk["projetos"]["sugestoes"]
+    assert meu._passos_para(5, 10, 60) == 3 and meu._passos_para(9, 10, 60) == 0
+    for secao in ("visao", "agenda", "notificacoes", "solicitacoes", "questoes", "radar", "rankings", "clipping"):
+        r = adm.get(f"/meu/5894?secao={secao}")
+        assert r.status_code == 200, secao
+    assert "PL 500/2025" in adm.get("/meu/5894?secao=clipping").get_data(as_text=True)
+    assert adm.get("/meu/").status_code == 200                               # admin escolhe o senador

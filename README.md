@@ -92,3 +92,21 @@ cota.py       tetos da CEAPS por UF
 db.py         tabelas e normalização
 templates/ static/ tests/
 ```
+
+## Meu Parlamentar
+
+Área por senador, aberta só a quem o administrador vincular (em **Usuários → Meu parlamentar**).
+O administrador vê todos os senadores em exercício.
+
+| Seção | De onde vem |
+|---|---|
+| Agenda | Reuniões das comissões do senador e sessões do Plenário (API do Senado, 7 dias atrás e 45 à frente) + compromissos lançados pela equipe |
+| Notificações | Mudanças de situação das proposições, detectadas na coleta diária |
+| Solicitações | Registro com status, prazo e anexos (até 10 MB cada, guardados no banco) |
+| Questões de ordem | IA (Claude, API da Anthropic) com base no Regimento Interno enviado pelo admin (PDF/TXT) |
+| Radar de notícias | Google Notícias (nome do senador + temas cadastrados), últimos 60 dias |
+| Rankings | Posição entre os senadores em exercício e quanto falta para subir |
+| Clipping | Proposições do senador e relatorias com situação de aprovação, por data |
+
+Relatorias e notícias são coletadas uma vez por dia, só para senadores com usuário vinculado;
+o botão **Atualizar agora** busca na hora. Para ligar a IA, configure `ANTHROPIC_API_KEY` no Railway.
