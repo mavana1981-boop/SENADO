@@ -297,9 +297,9 @@ td.dias b.d3{color:#b03021}
 @media (max-width:640px){ .notif{flex-wrap:wrap} .notif-quando{width:100%;text-align:left;padding-left:52px} .notif-quando small{display:inline;margin-left:6px} }
 
 /* ---------------- Meu parlamentar ---------------- */
-.abas a.meu-link{color:#f3dfa8;border:1px solid rgba(201,162,74,.55)}
-.abas a.meu-link:hover{background:rgba(201,162,74,.18);color:#fff}
-.abas a.meu-link.ativa{background:var(--ouro);border-color:var(--ouro);color:#fff}
+.abas a.meu-link{background:#f2c230;color:#3d2c00;font-weight:700;margin-right:6px}
+.abas a.meu-link:hover{background:#ffd54a;color:#2a1e00}
+.abas a.meu-link.ativa{background:#ffd54a;color:#2a1e00;box-shadow:0 0 0 2px #fff inset}
 .meu-topo{border-top:3px solid var(--ouro)}
 .meu-rotulo{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#8a6d22;font-weight:700}
 .meu-nav{display:flex;gap:4px;overflow-x:auto;margin:0 0 14px;padding:4px;background:var(--card);border:1px solid var(--linha);border-radius:10px;scrollbar-width:thin}

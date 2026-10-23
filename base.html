@@ -15,6 +15,7 @@
     <a class="marca" href="{{ url_for('index') }}">{{ selo.selo(34, fundo="rgba(255,255,255,.08)") }}
       <span>Painel do Senado<small>Liderança da Oposição · 57ª Legislatura</small></span></a>
     <nav class="abas">
+      {% if menu_meu %}<a href="{{ url_for('meu.inicio') }}" class="meu-link {{ 'ativa' if aba == 'meu' }}">Meu parlamentar</a>{% endif %}
       {% for slug, nome in abas %}
         {% if slug in abas_senador %}
           <a href="{{ url_for(slug) }}" class="{{ 'ativa' if aba == slug }}">{{ nome }}</a>
@@ -23,7 +24,6 @@
              class="{{ 'ativa' if aba == slug }}">{{ nome }}</a>
         {% endif %}
       {% endfor %}
-      {% if menu_meu %}<a href="{{ url_for('meu.inicio') }}" class="meu-link {{ 'ativa' if aba == 'meu' }}">Meu parlamentar</a>{% endif %}
     </nav>
     {% if op and op.ultima_coleta %}<div class="coleta" title="Última atualização dos dados">Dados de {{ op.ultima_coleta|data }}</div>{% endif %}
     {% if usuario %}
