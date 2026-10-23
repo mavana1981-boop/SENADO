@@ -1,5 +1,6 @@
 """Painel do Senado — Liderança da Oposição.  Flask + PostgreSQL (Railway)."""
 import logging
+import hashlib
 import os
 import threading
 from datetime import date
@@ -63,7 +64,23 @@ ABAS_SENADOR = {"perfil", "proposicoes", "cota"}   # abas com seletor de senador
 
 @app.context_processor
 def _ctx():
-    return {"abas": ABAS, "abas_senador": ABAS_SENADOR}
+    return {"abas": ABAS, "abas_senador": ABAS_SENADOR, "versao_css": _versao_css()}
+
+
+def _versao_css():
+    """Muda quando o style.css muda: força o navegador a baixar o arquivo novo em vez do guardado em cache."""
+    global _VERSAO_CSS
+    if _VERSAO_CSS is None:
+        base = _achar("style.css", "static")
+        try:
+            with open(os.path.join(base, "style.css"), "rb") as f:
+                _VERSAO_CSS = hashlib.md5(f.read()).hexdigest()[:10]
+        except (OSError, TypeError):
+            _VERSAO_CSS = "0"
+    return _VERSAO_CSS
+
+
+_VERSAO_CSS = None
 
 
 def _contexto_filtros():
