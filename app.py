@@ -180,7 +180,8 @@ def perfil():
     return render_template(
         "perfil.html", aba="perfil", op=op, lista=lista, s=s, cod=cod,
         perfil=paineis.perfil(cod), ind=paineis.indicadores_senador(cod),
-        props=paineis.proposicoes(cod, limite=0), cota=paineis.cota_senador(cod))
+        props=paineis.proposicoes(cod, limite=0), cota=paineis.cota_senador(cod),
+        notif=paineis.notificacoes(cod))
 
 
 @app.route("/proposicoes")
@@ -192,7 +193,8 @@ def proposicoes():
     a = request.args
     filtros = {"papel": a.get("papel", ""), "sigla": a.get("sigla", ""),
                "situacao": a.get("situacao", ""), "inicio": _data(a.get("inicio")),
-               "fim": _data(a.get("fim")), "busca": (a.get("busca") or "").strip()}
+               "fim": _data(a.get("fim")), "busca": (a.get("busca") or "").strip(),
+               "ordem": a.get("ordem", "") if a.get("ordem", "") in paineis.ORDENS_PROPOSICOES else ""}
     return render_template(
         "proposicoes.html", aba="proposicoes", op=op, lista=lista, cod=cod,
         s=paineis.senador(cod), fp=filtros, props=paineis.proposicoes(cod, **filtros),

@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 import requests
 from sqlalchemy import delete, insert, select, update
 
-from db import (autorias, despesas, engine, init_db, meta, norm_nome, norm_partido,
+from db import (autorias, despesas, engine, init_db, meta, notificacoes, norm_nome, norm_partido,
                 norm_voto, perfis, processos,
                 orientacoes, senadores, votacoes, votos)
 
@@ -487,17 +487,44 @@ def parse_processo(p: dict) -> dict:
     }
 
 
-def gravar_processos(conn, codigo_senador: int, nome_norm: str, itens):
+def gravar_processos(conn, codigo_senador: int, nome_norm: str, itens, notificar=False):
+    """Grava as proposições do senador. Com notificar=True (coletas depois da carga inicial),
+    registra em `notificacoes` cada proposição que mudou de situação ou que apareceu."""
     n = 0
+    agora = datetime.now()
+    ja_tinha = notificar and conn.execute(select(autorias.c.processo_id).where(
+        autorias.c.codigo_senador == codigo_senador).limit(1)).first() is not None
     for p in itens or []:
         if p.get("id") is None:
             continue
         linha = parse_processo(p)
-        existe = conn.execute(select(processos.c.id).where(processos.c.id == linha["id"])).first()
-        if existe:
+        antes = conn.execute(select(processos.c.situacao, processos.c.data_situacao)
+                             .where(processos.c.id == linha["id"])).first()
+        if antes:
             conn.execute(update(processos).where(processos.c.id == linha["id"]).values(**linha))
         else:
             conn.execute(insert(processos).values(**linha))
+        vinculo = conn.execute(select(autorias.c.processo_id).where(
+            autorias.c.processo_id == linha["id"],
+            autorias.c.codigo_senador == codigo_senador)).first()
+        if notificar:
+            if antes and linha["situacao"] and (
+                    (antes.situacao or "") != (linha["situacao"] or "")
+                    or (antes.data_situacao or "") != (linha["data_situacao"] or "")):
+                # avisa todos os autores já conhecidos (a proposição só muda uma vez no banco)
+                autores = {r[0] for r in conn.execute(select(autorias.c.codigo_senador).where(
+                    autorias.c.processo_id == linha["id"]))} | {codigo_senador}
+                for cod in autores:
+                    conn.execute(insert(notificacoes).values(
+                        codigo_senador=cod, processo_id=linha["id"], identificacao=linha["identificacao"],
+                        tipo="situacao", situacao_anterior=antes.situacao, situacao_nova=linha["situacao"],
+                        data_situacao=linha["data_situacao"], detectado_em=agora))
+            elif not vinculo and ja_tinha:
+                conn.execute(insert(notificacoes).values(
+                    codigo_senador=codigo_senador, processo_id=linha["id"],
+                    identificacao=linha["identificacao"], tipo="nova", situacao_anterior=None,
+                    situacao_nova=linha["situacao"], data_situacao=linha["data_apresentacao"],
+                    detectado_em=agora))
         principal = bool(nome_norm) and _primeiro_autor(linha["autoria"]) == nome_norm
         conn.execute(delete(autorias).where(autorias.c.processo_id == linha["id"],
                                             autorias.c.codigo_senador == codigo_senador))
@@ -507,12 +534,22 @@ def gravar_processos(conn, codigo_senador: int, nome_norm: str, itens):
     return n
 
 
+DIAS_NOTIFICACOES = 180   # notificações mais antigas são apagadas
+
+
+def limpar_notificacoes(conn, hoje=None):
+    limite = datetime.combine((hoje or date.today()) - timedelta(days=DIAS_NOTIFICACOES), datetime.min.time())
+    conn.execute(delete(notificacoes).where(notificacoes.c.detectado_em < limite))
+
+
 def coletar_processos(codigos=None):
     with engine.connect() as c:
         q = select(senadores.c.codigo, senadores.c.nome_norm)
         if codigos:
             q = q.where(senadores.c.codigo.in_(codigos))
         alvo = c.execute(q).all()
+    # na carga inicial tudo é "novo": só notifica depois que as proposições já foram coletadas uma vez
+    notificar = _etapa_concluida("proposições")
     for cod, nn in alvo:
         try:
             itens = get_json(f"/processo?codigoParlamentarAutor={cod}&v=1")
@@ -520,8 +557,10 @@ def coletar_processos(codigos=None):
             log.warning("processos do senador %s: %s", cod, e)
             continue
         with engine.begin() as c:
-            n = gravar_processos(c, cod, nn, itens if isinstance(itens, list) else [])
+            n = gravar_processos(c, cod, nn, itens if isinstance(itens, list) else [], notificar)
         log.info("processos senador %s: %d", cod, n)
+    with engine.begin() as c:
+        limpar_notificacoes(c)
 
 
 # ---------------- Perfil (detalhe, comissões, cargos) ----------------

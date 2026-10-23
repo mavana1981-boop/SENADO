@@ -18,6 +18,10 @@
     <option value="tramitando" {{ 'selected' if fp.situacao == 'tramitando' }}>Tramitando</option>
     <option value="encerrada" {{ 'selected' if fp.situacao == 'encerrada' }}>Tramitação encerrada</option>
     <option value="norma" {{ 'selected' if fp.situacao == 'norma' }}>Virou norma jurídica</option></select></label>
+  <label>Ordenar<select name="ordem">
+    <option value="">Mais recentes</option>
+    <option value="parado" {{ 'selected' if fp.ordem == 'parado' }}>Mais dias parado</option>
+    <option value="parado_asc" {{ 'selected' if fp.ordem == 'parado_asc' }}>Menos dias parado</option></select></label>
   <label>Apresentada de<input type="date" name="inicio" value="{{ fp.inicio or '' }}"></label>
   <label>até<input type="date" name="fim" value="{{ fp.fim or '' }}"></label>
   <button class="btn">Filtrar</button>
@@ -40,10 +44,12 @@
 </section>
 
 <section class="card neu">
-  <h2>Proposições <small>{{ props.itens|length }}{% if props.itens|length >= 400 %} mais recentes{% endif %}</small></h2>
+  {% set q = request.args.to_dict() %}{% set _ = q.update({'senador': cod, 'ordem': 'parado_asc' if fp.ordem == 'parado' else 'parado'}) %}
+  <h2>Proposições <small>{{ props.itens|length }}{% if props.itens|length >= 400 %} {{ 'mais paradas' if fp.ordem == 'parado' else ('menos paradas' if fp.ordem == 'parado_asc' else 'mais recentes') }}{% endif %}</small></h2>
   <div class="rolagem" style="max-height:640px">
   <table>
-    <thead><tr><th style="white-space:nowrap">Apresentação</th><th>Proposição</th><th>Ementa</th><th class="m-esc">Situação atual</th></tr></thead>
+    <thead><tr><th style="white-space:nowrap">Apresentação</th><th>Proposição</th><th>Ementa</th><th class="m-esc">Situação atual</th>
+      <th class="n ordenavel{{ ' ativa' if fp.ordem in ('parado','parado_asc') }}" style="white-space:nowrap"><a href="{{ url_for('proposicoes', **q) }}" title="Ordenar por dias parado">Dias parado <span class="seta">{{ '▼' if fp.ordem == 'parado' else ('▲' if fp.ordem == 'parado_asc' else '↕') }}</span></a></th></tr></thead>
     <tbody>
     {% for p in props.itens %}
       <tr>
@@ -53,11 +59,14 @@
         <td style="font-size:13px">{{ p.ementa or '' }}
           {% if not p.principal and p.autoria %}<div style="font-size:11px;color:var(--suave);margin-top:2px">{{ p.autoria[:120] }}{{ '…' if p.autoria|length > 120 }}</div>{% endif %}</td>
         <td class="m-esc" style="font-size:12px">{{ p.situacao or '—' }}{% if p.data_situacao %}<div style="color:var(--suave)">{{ p.data_situacao|data }}</div>{% endif %}</td>
+        <td class="n dias">{% if p.dias_parado is not none %}
+          <b class="{{ 'd3' if p.dias_parado >= 365 else ('d2' if p.dias_parado >= 180 else ('d1' if p.dias_parado >= 90 else '')) }}" title="Desde {{ (p.data_situacao or p.data_apresentacao)|data }}">{{ p.dias_parado|mil }}</b>
+          {% else %}<span style="color:var(--suave);font-size:11px" title="Tramitação encerrada">—</span>{% endif %}</td>
       </tr>
-    {% else %}<tr><td colspan="4" class="vazio-msg">Nenhuma proposição neste recorte.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="5" class="vazio-msg">Nenhuma proposição neste recorte.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
-  <p class="nota">Fonte: serviço de processos legislativos do Senado (autoria e coautoria). “1º autor” = o senador aparece em primeiro na autoria.</p>
+  <p class="nota">Fonte: serviço de processos legislativos do Senado (autoria e coautoria). “1º autor” = o senador aparece em primeiro na autoria. Dias parado = dias desde a data da situação atual (sem ela, desde a apresentação); só para proposições em tramitação. Clique no título da coluna para ordenar.</p>
 </section>
 {% endblock %}

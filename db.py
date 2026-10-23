@@ -114,6 +114,19 @@ autorias = Table(
     Column("principal", Boolean, default=False),
 )
 
+notificacoes = Table(  # mudanças de situação das proposições, detectadas na coleta diária
+    "notificacoes", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("codigo_senador", Integer, index=True),
+    Column("processo_id", BigInteger, index=True),
+    Column("identificacao", String(60)),
+    Column("tipo", String(20)),                 # "situacao" (mudou) ou "nova" (proposição nova)
+    Column("situacao_anterior", String(200)),
+    Column("situacao_nova", String(200)),
+    Column("data_situacao", String(10)),        # data da situação nova, segundo o Senado
+    Column("detectado_em", DateTime, index=True),
+)
+
 perfis = Table(  # detalhe, comissões e cargos de cada senador (JSON da API)
     "perfis", metadata,
     Column("codigo", Integer, primary_key=True),
