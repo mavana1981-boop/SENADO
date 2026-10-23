@@ -174,9 +174,11 @@ def perfil():
     if not cod:
         return render_template("vazio.html", aba="perfil", op=op, lista=lista)
     s = paineis.senador(cod)
+    so_opostas = request.args.get("recorte") != "todas"
     return render_template(
         "perfil.html", aba="perfil", op=op, lista=lista, s=s, cod=cod,
         perfil=paineis.perfil(cod), ind=paineis.indicadores_senador(cod),
+        vopo=paineis.votos_oposicao(cod, so_opostas),
         props=paineis.proposicoes(cod, limite=0), cota=paineis.cota_senador(cod))
 
 
