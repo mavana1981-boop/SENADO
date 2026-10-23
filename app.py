@@ -106,8 +106,11 @@ def index():
 @app.route("/orientacoes")
 def orientacoes():
     f, op = _contexto_filtros()
+    cod, lista = _senador_da_requisicao()
     return render_template(
         "orientacoes.html", aba="orientacoes", f=f, op=op,
+        lista=lista, cod=cod, s=paineis.senador(cod) if cod else None,
+        vopo=paineis.votos_oposicao(cod, f) if cod else None,
         resumo=metrics.resumo(f),
         governismo=metrics.alinhamento("Governo", f),
         oposicionismo=metrics.alinhamento("Oposição", f),
@@ -174,11 +177,9 @@ def perfil():
     if not cod:
         return render_template("vazio.html", aba="perfil", op=op, lista=lista)
     s = paineis.senador(cod)
-    so_opostas = request.args.get("recorte") != "todas"
     return render_template(
         "perfil.html", aba="perfil", op=op, lista=lista, s=s, cod=cod,
         perfil=paineis.perfil(cod), ind=paineis.indicadores_senador(cod),
-        vopo=paineis.votos_oposicao(cod, so_opostas),
         props=paineis.proposicoes(cod, limite=0), cota=paineis.cota_senador(cod))
 
 
