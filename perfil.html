@@ -14,6 +14,47 @@
   <div class="kpi dest ouro"><b>{{ cota.total.pct_uso|pct if cota else '—' }}</b><span>Uso da cota (2023–hoje)</span><small>{{ cota.total.gasto|brl(0) if cota else '' }} gastos</small></div>
 </section>
 
+{% macro lista_vopo(itens, vazio) -%}
+<div class="rolagem" style="max-height:440px">
+<table class="vopo">
+  <thead><tr><th class="m-esc">Data</th><th>Matéria</th><th class="c">Voto</th><th class="c">Oposição</th><th class="c m-esc">Governo</th></tr></thead>
+  <tbody>
+  {% for v in itens %}
+    <tr>
+      <td class="m-esc" style="white-space:nowrap;color:var(--suave)">{{ v.data|data }}</td>
+      <td><a href="{{ url_for('votacoes', id=v.id) }}"><b>{{ v.sigla_materia }} {{ v.numero_materia }}/{{ v.ano_materia }}</b></a>{% if v.dispositivo %} <span style="color:var(--suave);font-size:12px">· {{ v.dispositivo }}</span>{% endif %}
+        <div class="vopo-desc" title="{{ v.descricao_materia or '' }}">{{ v.descricao_materia or v.descricao_votacao or '' }}</div>
+        <div class="vopo-data">{{ v.data|data }}</div></td>
+      <td class="c"><span class="pill {{ v.voto }}">{{ v.voto }}</span></td>
+      <td class="c"><span class="pill {{ v.opo }}">{{ v.opo }}</span></td>
+      <td class="c m-esc"><span class="pill {{ v.gov or 'vazio' }}">{{ v.gov or '—' }}</span></td>
+    </tr>
+  {% else %}<tr><td colspan="5" class="vazio-msg">{{ vazio }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+
+<section class="card neu vopo-quadro">
+  <h2>Votos × orientação da Oposição
+    <small>{{ vopo.total }} {{ 'votação' if vopo.total == 1 else 'votações' }} · {{ ((100 * vopo.seguiu|length / vopo.total)|round(1))|pct if vopo.total else '—' }} a favor</small></h2>
+  <div class="vopo-recorte">
+    <a class="{{ 'sel' if vopo.opostas }}" href="{{ url_for('perfil', senador=cod) }}">Só orientações opostas (Gov × Oposição)</a>
+    <a class="{{ 'sel' if not vopo.opostas }}" href="{{ url_for('perfil', senador=cod, recorte='todas') }}">Todas com orientação da Oposição</a>
+  </div>
+  <div class="grade vopo-grade">
+    <div class="card opo">
+      <h2>Favoráveis à Oposição <small>{{ vopo.seguiu|length }}</small></h2>
+      {{ lista_vopo(vopo.seguiu, 'Nenhum voto acompanhando a Oposição neste recorte.') }}
+    </div>
+    <div class="card gov">
+      <h2>Contrários à Oposição <small>{{ vopo.contra|length }}</small></h2>
+      {{ lista_vopo(vopo.contra, 'Nenhum voto contra a Oposição neste recorte.') }}
+    </div>
+  </div>
+  <p class="nota">Conta só votos Sim/Não do senador em votações nominais em que a Oposição orientou Sim ou Não. Orientação liberada, abstenções e votos secretos ficam fora, como no % de oposicionismo.</p>
+</section>
+
 <section class="grade">
   <div class="card neu">
     <h2>Dados pessoais</h2>

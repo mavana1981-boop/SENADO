@@ -162,6 +162,34 @@ def indicadores_senador(codigo):
     return res
 
 
+@_memo
+def votos_oposicao(codigo, opostas=True):
+    """Votações em que o senador seguiu ou contrariou a orientação da Oposição.
+
+    Mesma regra do % de oposicionismo: entram só votos SIM/NÃO do senador em votações
+    em que a Oposição orientou SIM ou NÃO. Com opostas=True, só as votações em que
+    Governo e Oposição orientaram em sentidos contrários (recorte do indicador do perfil).
+    """
+    where, p = metrics.Filtros(opostas=opostas).where_votacoes()
+    p["c"] = codigo
+    sql = text(f"""
+        SELECT vt.id, vt.data, vt.sigla_materia, vt.numero_materia, vt.ano_materia,
+               vt.dispositivo, vt.descricao_materia, vt.descricao_votacao,
+               v.voto AS voto, o.voto AS opo, g.voto AS gov
+        FROM votos v
+        JOIN votacoes vt ON vt.id = v.votacao_id
+        JOIN orientacoes o ON o.votacao_id = v.votacao_id AND o.lideranca = 'Oposição'
+        LEFT JOIN orientacoes g ON g.votacao_id = v.votacao_id AND g.lideranca = 'Governo'
+        WHERE v.codigo_senador = :c AND o.voto IN ('SIM','NÃO') AND v.voto IN ('SIM','NÃO')
+          AND {where}
+        ORDER BY vt.data DESC, vt.id DESC""")
+    with engine.connect() as c:
+        linhas = [dict(r) for r in c.execute(sql, p).mappings()]
+    seguiu = [r for r in linhas if r["voto"] == r["opo"]]
+    contra = [r for r in linhas if r["voto"] != r["opo"]]
+    return {"seguiu": seguiu, "contra": contra, "total": len(linhas), "opostas": opostas}
+
+
 # ---------------- proposições ----------------
 
 def proposicoes(codigo, papel="", sigla="", situacao="", inicio=None, fim=None, busca="", limite=400):

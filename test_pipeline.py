@@ -254,6 +254,29 @@ def test_perfil():
     assert ind["opo"] == 100.0 and ind["participacao"] is not None
 
 
+def test_votos_oposicao_no_perfil():
+    import paineis
+    # Flávio Bolsonaro seguiu a Oposição; a contagem bate com o % do indicador
+    vo = paineis.votos_oposicao(5894, True)
+    ind = paineis.indicadores_senador(5894)
+    assert len(vo["seguiu"]) == 1 and vo["contra"] == [] and vo["total"] == ind["opo_n"]
+    v = vo["seguiu"][0]
+    assert v["voto"] == v["opo"] == "SIM" or v["voto"] == v["opo"] == "NÃO"
+    assert v["gov"] in ("SIM", "NÃO") and v["gov"] != v["opo"]
+    # Romário votou contra a Oposição
+    cod_rom = next(s["codigo"] for s in paineis.lista_senadores() if s["nome"] == "Romário")
+    vr = paineis.votos_oposicao(cod_rom, True)
+    assert vr["seguiu"] == [] and len(vr["contra"]) == 1
+    # recorte "todas" nunca tem menos votações que o de orientações opostas
+    assert paineis.votos_oposicao(5894, False)["total"] >= vo["total"]
+    cli = _cliente()
+    html = cli.get("/perfil?senador=5894").get_data(as_text=True)
+    assert "Favoráveis à Oposição" in html and "Contrários à Oposição" in html
+    assert "PL 3626/2023" in html
+    html = cli.get(f"/perfil?senador={cod_rom}&recorte=todas").get_data(as_text=True)
+    assert "Contrários à Oposição" in html and "PL 3626/2023" in html
+
+
 def test_abas_novas_renderizam():
     cli = _cliente()
     for url in ["/perfil?senador=5672", "/perfil?senador=5894", "/proposicoes?senador=5894",
