@@ -10,19 +10,15 @@ depender de um caminho fixo.
 """
 import logging
 import re
-import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
-from email.utils import parsedate_to_datetime
-from urllib.parse import quote
 
 from sqlalchemy import delete, insert, select, update
 
-from db import agenda, engine, noticias, relatorias, senadores, temas_radar, usuario_senadores
+from db import agenda, engine, relatorias, usuario_senadores
 
 log = logging.getLogger("meu_parlamentar")
 
 DIAS_AGENDA_PASSADO, DIAS_AGENDA_FUTURO = 7, 45
-DIAS_NOTICIAS = 60
 MAX_RELATORIAS_DETALHE = 150
 
 # ---------------- utilitários de leitura ----------------
@@ -314,79 +310,10 @@ def coletar_relatorias(codigo, inicio_legislatura="2023-02-01"):
 
 
 # ---------------- radar de notícias ----------------
-
-def url_noticias(consulta):
-    return ("https://news.google.com/rss/search?q=" + quote(f"{consulta} when:7d")
-            + "&hl=pt-BR&gl=BR&ceid=BR:pt-419")
-
-
-def parse_rss(xml_texto):
-    out = []
-    try:
-        raiz = ET.fromstring(xml_texto)
-    except ET.ParseError:
-        return out
-    for it in raiz.iter("item"):
-        titulo = (it.findtext("title") or "").strip()
-        link = (it.findtext("link") or "").strip()
-        if not titulo or not link:
-            continue
-        fonte = (it.findtext("source") or "").strip() or None
-        if fonte and titulo.endswith(f" - {fonte}"):
-            titulo = titulo[: -len(fonte) - 3].strip()
-        try:
-            pub = parsedate_to_datetime(it.findtext("pubDate")).replace(tzinfo=None)
-        except (TypeError, ValueError):
-            pub = None
-        out.append({"titulo": titulo[:500], "link": link[:1000], "fonte": fonte, "publicado": pub})
-    return out
-
-
-def consultas_radar(codigo):
-    with engine.connect() as c:
-        s = c.execute(select(senadores.c.nome).where(senadores.c.codigo == codigo)).first()
-        temas = [r[0] for r in c.execute(select(temas_radar.c.termo).where(
-            temas_radar.c.codigo_senador == codigo).order_by(temas_radar.c.termo))]
-    out = []
-    if s:
-        out.append((s[0], f'"{s[0]}" senador'))
-    out += [(t, t) for t in temas]
-    return out
-
-
-def gravar_noticias(conn, codigo, termo, itens, hoje=None):
-    agora = datetime.now()
-    conhecidos = {r[0] for r in conn.execute(select(noticias.c.link).where(noticias.c.codigo_senador == codigo))}
-    n = 0
-    for it in itens:
-        if it["link"] in conhecidos:
-            continue
-        conhecidos.add(it["link"])
-        conn.execute(insert(noticias).values(codigo_senador=codigo, termo=termo, coletado_em=agora, **it))
-        n += 1
-    corte = datetime.combine((hoje or date.today()) - timedelta(days=DIAS_NOTICIAS), datetime.min.time())
-    conn.execute(delete(noticias).where(noticias.c.codigo_senador == codigo, noticias.c.coletado_em < corte))
-    return n
-
-
-def coletar_noticias(codigo):
-    import requests
-    total = 0
-    for termo, consulta in consultas_radar(codigo):
-        try:
-            r = requests.get(url_noticias(consulta), timeout=30,
-                             headers={"User-Agent": "Mozilla/5.0 (painel-senado)"})
-            if r.status_code != 200:
-                log.warning("radar %s/%s: HTTP %s", codigo, termo, r.status_code)
-                continue
-            itens = parse_rss(r.text)
-        except Exception as e:
-            log.warning("radar %s/%s: %s", codigo, termo, e)
-            continue
-        with engine.begin() as c:
-            total += gravar_noticias(c, codigo, termo, itens[:40])
-    log.info("radar senador %s: %d notícias novas", codigo, total)
-    return total
+# A coleta e a análise ficam em radar.py (modelo do Monitor Legislativo); os nomes abaixo
+# continuam disponíveis aqui por compatibilidade.
+from radar import consultas_radar, gravar_noticias, url_noticias  # noqa: E402,F401
+from radar import parse_feed as parse_rss  # noqa: E402,F401
 
 
 # ---------------- orquestração ----------------
@@ -404,8 +331,12 @@ def executar(codigos=None, agenda_tambem=True):
         except Exception:
             log.exception("agenda")
     for cod in (codigos if codigos is not None else senadores_vinculados()):
-        for fn in (coletar_relatorias, coletar_noticias):
-            try:
-                fn(cod)
-            except Exception:
-                log.exception("%s do senador %s", fn.__name__, cod)
+        try:
+            coletar_relatorias(cod)
+        except Exception:
+            log.exception("relatorias do senador %s", cod)
+    import radar
+    try:
+        radar.ciclo(codigos)
+    except Exception:
+        log.exception("radar de notícias")

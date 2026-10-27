@@ -104,9 +104,11 @@ O administrador vê todos os senadores em exercício.
 | Notificações | Mudanças de situação das proposições, detectadas na coleta diária |
 | Solicitações | Registro com status, prazo e anexos (até 10 MB cada, guardados no banco) |
 | Questões de ordem | IA (Claude, API da Anthropic) com base no Regimento Interno enviado pelo admin (PDF/TXT) |
-| Radar de notícias | Google Notícias (nome do senador + temas cadastrados), últimos 60 dias |
+| Radar de notícias | No modelo do Monitor Legislativo: os mesmos portais (RSS, editáveis pelo admin) a cada 2 horas, mais o Google Notícias; entram as notícias que citam o senador ou um tema cadastrado, e a IA indica relevância, categoria, tipo de ação e ação sugerida. A equipe marca Pendente / Em análise / Ação efetuada |
 | Rankings | Posição entre os senadores em exercício e quanto falta para subir |
 | Clipping | Proposições do senador e relatorias com situação de aprovação, por data |
 
-Relatorias e notícias são coletadas uma vez por dia, só para senadores com usuário vinculado;
-o botão **Atualizar agora** busca na hora. Para ligar a IA, configure `ANTHROPIC_API_KEY` no Railway.
+Relatorias são coletadas uma vez por dia e o radar a cada 2 horas (`RADAR_HORAS`; `AUTO_RADAR=0` desliga), só para
+senadores com usuário vinculado; o botão **Atualizar agora** busca na hora. A IA do radar e das questões de ordem usa
+`ANTHROPIC_API_KEY`; o modelo do radar fica em `RADAR_MODEL` (padrão `claude-haiku-5-5`) e o limite de análises por
+senador e ciclo em `RADAR_MAX_ANALISES` (30).
