@@ -305,6 +305,11 @@ def lista_relatorias(cod):
 
 # ---------------- rankings + sugestões ----------------
 
+def _mil(v):
+    """1234567.8 → '1.234.568' (sem trocar outras vírgulas da frase)."""
+    return f"{v:,.0f}".replace(",", ".")
+
+
 def _passos_para(seguiu, total, alvo_pct):
     """Quantos acertos seguidos levam o percentual (seguiu/total) acima de alvo_pct."""
     p = (alvo_pct or 0) / 100
@@ -392,12 +397,11 @@ def sugestoes(cod, r):
             disp, econ = c["total"]["disponivel"], c["total"]["economia"]
             falta = acima["pct"] / 100 * disp - econ
             if falta > 0:
-                out.append(f"Gastando R$ {falta:,.0f} a menos no período, passa {acima['nome']} e sobe para "
-                           f"{pos['pos'] - 1}º.".replace(",", "."))
+                out.append(f"Gastando R$ {_mil(falta)} a menos no período, passa {acima['nome']} e sobe para "
+                           f"{pos['pos'] - 1}º.")
         if c and c["categorias"]:
             top = c["categorias"][0]
-            out.append(f"A maior despesa é \"{top['tipo']}\" (R$ {top['total']:,.0f}); é onde a economia rende mais."
-                       .replace(",", "."))
+            out.append(f"A maior despesa é \"{top['tipo']}\" (R$ {_mil(top['total'])}); é onde a economia rende mais.")
     elif r["slug"] == "fidelidade":
         out.append(f"Votou com a orientação do próprio partido em {linha['seguiu']} de {linha['total']} votações.")
     elif r["slug"] == "governismo":

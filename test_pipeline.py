@@ -649,6 +649,10 @@ def test_radar_relatorias_clipping_e_rankings():
     rk = {r["slug"]: r for r in meu.rankings(5894)}
     assert rk["projetos"]["posicao"]["pos"] >= 1 and rk["projetos"]["sugestoes"]
     assert meu._passos_para(5, 10, 60) == 3 and meu._passos_para(9, 10, 60) == 0
+    assert meu._mil(1234567.8) == "1.234.568"
+    for r in rk.values():
+        for x in r["sugestoes"]:
+            assert ". passa " not in x, x          # vírgula da frase não vira ponto
     for secao in ("visao", "agenda", "notificacoes", "solicitacoes", "questoes", "radar", "rankings", "clipping"):
         r = adm.get(f"/meu/5894?secao={secao}")
         assert r.status_code == 200, secao
