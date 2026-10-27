@@ -610,3 +610,13 @@ td.vinc details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(
 .fontes-lista li.off span{color:var(--suave);text-decoration:line-through}
 .fontes-lista form{display:flex;gap:4px;margin:0}
 @media (max-width:640px){ .rn-termo{margin-left:0} .rn-form input.mini{width:100%} }
+
+/* barra superior: as abas ficam numa linha própria e quebram em várias linhas — nunca cortam */
+.topo-in{flex-wrap:wrap;row-gap:6px}
+.abas{order:3;flex:1 1 100%;flex-wrap:wrap;overflow:visible;row-gap:4px;padding-bottom:2px}
+.coleta{margin-left:auto}
+@media (max-width:640px){
+  .abas{gap:3px}
+  .abas a{padding:6px 9px;font-size:13px}
+  .abas a.meu-link{margin-right:0}
+}
